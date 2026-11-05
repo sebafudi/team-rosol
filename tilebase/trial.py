@@ -47,7 +47,7 @@ ROWS = (
 
 STOCK = ("crate", "plank", "step", "spring")
 START_TOKENS = 1
-HINT = "1 token = 1 prompt   tab map   hold v"
+HINT = "each prompt costs 1 token   tab map"
 
 
 def _stand(col: int, row: int) -> Vec2:
