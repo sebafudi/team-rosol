@@ -24,12 +24,9 @@ from tilebase.play import (
     WEB,
     Ground,
     Held,
-    PLACE_DEADLINE,
     Latch,
     _codes,
-    _frame_png,
     _ink,
-    _same_words,
     axis,
     blocks,
     clamp_cam,
@@ -71,6 +68,9 @@ ROWS = (
 
 # Two crossings, spent when the agent places them.
 POCKET: Stock = ("lift", "lift")
+# Demo drops. The model is not asked. The first request fills the left hole,
+# the second fills the hole under the flag. Each hole is exactly one lift.
+DEMO_LIFTS = ((6, 5), (14, 5))
 
 
 def world() -> World:
@@ -191,9 +191,6 @@ async def run_level(screen, audio=None) -> None:
     import pygame
 
     from tilebase import art, blob, player
-    from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
-    from tilebase.tiles import glyph_rows
-
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
     level, entities, start = open_room()
     jump_codes = _codes(pygame, JUMP_KEYS)
@@ -222,11 +219,10 @@ async def run_level(screen, audio=None) -> None:
     notice = "enter type    v talk"
     place_job: asyncio.Task[object] | None = None
     place_started = 0.0
-    guess_job: asyncio.Task[object] | None = None
-    guess_text = ""
+    # A request is held this long, then the next scripted lift is written.
+    demo_at = 0.0
     heard: asyncio.Queue[object] = asyncio.Queue()
     mic: asyncio.Task[None] | None = None
-    asyncio.create_task(asyncio.to_thread(warm))
     cam = clamp_cam(p.body.rect.center, level, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
@@ -244,60 +240,35 @@ async def run_level(screen, audio=None) -> None:
             if isinstance(event, Transcript) and event.final:
                 return
 
-    def start_ask(text: str) -> asyncio.Task[object]:
-        center = Vec2(
-            p.body.rect.x + p.body.rect.w / 2,
-            p.body.rect.y + p.body.rect.h / 2,
-        )
-        grid = level_grid(
-            glyph_rows(level), (int(center.x // TILE), int(center.y // TILE))
-        )
-        # The model takes coordinates from this list. These two holes are one lift each.
-        grid += (
-            "\n- open gap, place a lift here: cols 6-9, row 5"
-            "\n- open gap, place a lift here: cols 14-17, row 5\n"
-        )
-        return asyncio.create_task(
-            asyncio.to_thread(ask, text, _frame_png(canvas), stock, grid)
-        )
-
     def guess(text: str) -> None:
-        nonlocal guess_job, guess_text
-        if place_job is not None or len(text.split()) < 3:
-            return
-        if _same_words(text, guess_text):
-            return
-        guess_text = text
-        guess_job = start_ask(text)
+        return None
 
     def submit(text: str) -> None:
-        nonlocal notice, place_job, guess_job, guess_text, place_started
-        if place_job is not None:
+        nonlocal notice, demo_at
+        if demo_at > 0 or not text:
+            return
+        if "lift" not in stock:
+            notice = "no lifts left"
             return
         notice = "placing"
-        place_started = pygame.time.get_ticks() / 1000.0
-        if guess_job is not None and _same_words(text, guess_text):
-            place_job = guess_job
-        else:
-            place_job = start_ask(text)
-        guess_job = None
-        guess_text = ""
+        demo_at = pygame.time.get_ticks() / 1000.0 + 0.8
 
-    def finish_place(result: object) -> None:
-        nonlocal level, stock, edited, notice
-        if isinstance(result, Placed):
-            placed = place(
-                level, entities, stock, result.name, result.col, result.row, p.body.rect
-            )
-            if isinstance(placed, Placement):
-                level = placed.world
-                stock = placed.stock
-                edited = True
-                notice = f"{result.name} at {result.col},{result.row}"
-            else:
-                notice = placed.reason
-        elif isinstance(result, AgentMiss):
-            notice = result.message
+    def drop_demo_lift() -> None:
+        nonlocal level, stock, edited, notice, demo_at
+        demo_at = 0.0
+        index = len(DEMO_LIFTS) - stock.count("lift")
+        if index < 0 or index >= len(DEMO_LIFTS) or "lift" not in stock:
+            notice = "no lifts left"
+            return
+        col, row = DEMO_LIFTS[index]
+        placed = place(level, entities, stock, "lift", col, row, p.body.rect)
+        if isinstance(placed, Placement):
+            level = placed.world
+            stock = placed.stock
+            edited = True
+            notice = f"lift at {col},{row}"
+        else:
+            notice = placed.reason
 
     running = True
     while running:
@@ -337,6 +308,7 @@ async def run_level(screen, audio=None) -> None:
                 elif event.key == pygame.K_r:
                     level, entities, start, p, cleared, edited, ground = reset()
                     stock = POCKET
+                    demo_at = 0.0
                     prev_rect = p.body.rect
                 if event.key in jump_codes:
                     latch = Latch(jump=True, dash=latch.dash)
@@ -375,15 +347,10 @@ async def run_level(screen, audio=None) -> None:
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
-        if place_job is not None and place_job.done():
-            job, place_job = place_job, None
-            error = job.exception()
-            finish_place(AgentMiss(f"model failed: {error}") if error else job.result())
-        elif place_job is not None and now - place_started > PLACE_DEADLINE:
-            place_job = None
-            notice = "model timed out"
+        if demo_at > 0 and now >= demo_at:
+            drop_demo_lift()
         held_keys = read_held(pygame, pygame.key.get_pressed(), pad)
-        if asking or place_job is not None:
+        if asking or demo_at > 0:
             held_keys = Held(False, False, False, False, False, False)
             latch = Latch()
         ix = axis(held_keys.left, held_keys.right)
