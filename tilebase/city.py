@@ -128,6 +128,22 @@ def _snow_cap(screen: object, origin: Vec2) -> None:
     pygame.draw.circle(screen, (186, 224, 255), (round(27 * TILE + 8 - origin.x), round(28 - origin.y)), 16)
 
 
+def draw_clear(screen: object) -> None:
+    """A card over the room, so the win is a screen and not a frozen player."""
+    import pygame
+
+    veil = pygame.Surface((VIEW.w, VIEW.h), pygame.SRCALPHA)
+    veil.fill((8, 12, 24, 150))
+    screen.blit(veil, (0, 0))
+    card = pygame.Rect(VIEW.w // 2 - 220, VIEW.h // 2 - 70, 440, 140)
+    pygame.draw.rect(screen, (236, 224, 196), card)
+    pygame.draw.rect(screen, (28, 24, 22), card, 3)
+    title = "you made it"
+    again = "enter to play again"
+    _ink(screen, title, card.x + (card.w - 24 * len(title)) // 2, card.y + 28, scale=4)
+    _ink(screen, again, card.x + (card.w - 12 * len(again)) // 2, card.y + 88, scale=2)
+
+
 def draw_hud(screen: object, line: str, stock: Stock) -> None:
     """Talk line on the left, pocket on the right. Bitmap glyphs, so it always shows."""
     import pygame
@@ -300,6 +316,17 @@ async def run_level(screen, audio=None) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and cleared:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                elif event.key in (pygame.K_RETURN, pygame.K_r):
+                    level, entities, start, p, cleared, edited, ground = reset()
+                    stock = POCKET
+                    lifts = ()
+                    demo_at = 0.0
+                    prompt = ""
+                    asking = False
+                    prev_rect = p.body.rect
             elif event.type == pygame.KEYDOWN and listening:
                 if event.key == pygame.K_ESCAPE:
                     listening = False
@@ -457,6 +484,8 @@ async def run_level(screen, audio=None) -> None:
             look,
             dashes_left=p.dashes_left,
         )
+        if cleared:
+            draw_clear(canvas)
         _present_level(screen, canvas)
         pygame.display.flip()
         if WEB:
