@@ -20,7 +20,7 @@ from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
-from tilebase.tiles import Cell, World, cells_overlapping, define, load_map, put_cell
+from tilebase.tiles import Cell, World, cells_overlapping, define, glyph_rows, load_map, put_cell
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
@@ -253,7 +253,7 @@ async def run() -> None:
         audio.stop()
         pygame.quit()
         return
-    from tilebase.agent import AgentMiss, Placed, ask, warm
+    from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
     from tilebase.speech import ListenError, Transcript
     from tilebase.box import level_surface, open_level, overlaps_exit
     from tilebase.contraptions import Placement, place, stock_line
@@ -314,8 +314,11 @@ async def run() -> None:
             p.body.rect.y + p.body.rect.h / 2,
         )
         sheet = level_surface(world, center, p, look, p.dashes_left)
+        grid = level_grid(
+            glyph_rows(world), (int(center.x // TILE), int(center.y // TILE))
+        )
         return asyncio.create_task(
-            asyncio.to_thread(ask, text, _frame_png(sheet), stock)
+            asyncio.to_thread(ask, text, _frame_png(sheet), stock, grid)
         )
 
     def guess(text: str) -> None:
