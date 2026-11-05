@@ -1,7 +1,7 @@
-"""Basic credit ledger for metering voice-agent stages.
+"""Token ledger. Voice stages spend it; a level adds to it when a token is collected.
 
 Balance `None` means unlimited tokens — used for testing so charges still
-log without ever rejecting a spend.
+log without ever rejecting a spend. A played level starts finite at zero.
 """
 
 from __future__ import annotations
@@ -61,6 +61,18 @@ def charge(
             spent=ledger.spent + amount,
             entries=ledger.entries + (entry,),
         )
+    )
+
+
+def grant(ledger: Ledger, amount: int, *, reason: str) -> Ledger:
+    """Add tokens to a finite balance. An unlimited ledger stays unlimited."""
+    if amount <= 0 or ledger.balance is None:
+        return ledger
+    entry = Entry(reason=reason, amount=amount, stage="grant")
+    return replace(
+        ledger,
+        balance=ledger.balance + amount,
+        entries=ledger.entries + (entry,),
     )
 
 
