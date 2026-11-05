@@ -44,6 +44,12 @@ class Tuning:
     wall_jump_reach: float = 12.0
     wall_jump_h: float = 520.0
     wall_jump_lock: float = 0.16
+    dashes: int = 1
+    dash_speed: float = 960.0
+    dash_time: float = 0.15
+    dash_end_speed: float = 640.0
+    dash_up_mult: float = 0.75
+    dash_buffer_time: float = 0.08
 
 
 @dataclass(frozen=True)
@@ -64,6 +70,9 @@ class Player:
     var_jump_speed: float = 0.0
     force_time: float = 0.0
     force_dir: int = 0
+    dash_buffer: float = 0.0
+    dash_time: float = 0.0
+    dash_dir: Vec2 = Vec2(0.0, 0.0)
 
 
 def spawn(x: float, y: float, tuning: Tuning = Tuning()) -> Player:
@@ -76,7 +85,7 @@ def spawn(x: float, y: float, tuning: Tuning = Tuning()) -> Player:
         wall_dir=0,
         wall_sliding=False,
         dashing=False,
-        dashes_left=0,
+        dashes_left=tuning.dashes,
         events=frozenset(),
         impact=0.0,
     )
@@ -100,43 +109,73 @@ def step(
     )
     var_jump = max(0.0, p.var_jump - dt)
     var_jump_speed = p.var_jump_speed
+    dash_buffer = (
+        t.dash_buffer_time if inp.dash_pressed else max(0.0, p.dash_buffer - dt)
+    )
     vx, vy = p.vel.x, p.vel.y
-    facing = inp.x if inp.x != 0 else p.facing
+    facing = p.facing if p.dashing or inp.x == 0 else inp.x
     force_time = max(0.0, p.force_time - dt)
     force_dir = p.force_dir if force_time > 0 else 0
     move_x = 0 if force_dir != 0 and inp.x == -force_dir else inp.x
+    dashing, dash_dir, dashes_left = p.dashing, p.dash_dir, p.dashes_left
+    dash_time = max(0.0, p.dash_time - dt)
 
-    vx = _run(vx, move_x, grounded, t, dt)
+    if dashing and dash_time <= 1e-9:
+        dashing = False
+        events.add("dash_end")
+        if vx * dash_dir.x + vy * dash_dir.y > t.dash_end_speed:
+            vx, vy = dash_dir.x * t.dash_end_speed, dash_dir.y * t.dash_end_speed
+            if vy < 0:
+                vy *= t.dash_up_mult
 
-    if jump_buffer > 0 and (grounded or coyote > 0):
-        vy = -t.jump_speed
-        vx += t.jump_h_boost * inp.x
-        var_jump, var_jump_speed = t.var_jump_time, vy
-        jump_buffer, coyote, grounded = 0.0, 0.0, False
-        events.add("jump")
-    elif jump_buffer > 0 and not grounded:
-        wall = _wall_near(world, p.body, t.wall_jump_reach, inp.x, blocks)
-        if wall != 0:
-            away = -wall
-            vx, vy = t.wall_jump_h * away, -t.jump_speed
+    if not dashing and dash_buffer > 0 and dashes_left > 0:
+        dash_dir = _dash_dir(inp, facing)
+        vx, vy = dash_dir.x * t.dash_speed, dash_dir.y * t.dash_speed
+        dashing, dash_time = True, t.dash_time
+        dashes_left -= 1
+        dash_buffer, var_jump, force_time, force_dir = 0.0, 0.0, 0.0, 0
+        facing = _sign(dash_dir.x) or facing
+        events.add("dash")
+    elif dashing:
+        if jump_buffer > 0 and grounded and dash_dir.y >= 0 and dash_dir.x != 0:
+            # Dash-jump: keep the dash's horizontal speed (a Celeste "super").
+            dashing = False
+            dashes_left = t.dashes
+            vy = -t.jump_speed
             var_jump, var_jump_speed = t.var_jump_time, vy
-            force_time, force_dir = t.wall_jump_lock, away
-            facing = away
-            jump_buffer = 0.0
-            events.add("wall_jump")
+            jump_buffer, coyote, grounded = 0.0, 0.0, False
+            events.update(("dash_end", "jump"))
+    else:
+        vx = _run(vx, move_x, grounded, t, dt)
+        if jump_buffer > 0 and (grounded or coyote > 0):
+            vy = -t.jump_speed
+            vx += t.jump_h_boost * inp.x
+            var_jump, var_jump_speed = t.var_jump_time, vy
+            jump_buffer, coyote, grounded = 0.0, 0.0, False
+            events.add("jump")
+        elif jump_buffer > 0 and not grounded:
+            wall = _wall_near(world, p.body, t.wall_jump_reach, inp.x, blocks)
+            if wall != 0:
+                away = -wall
+                vx, vy = t.wall_jump_h * away, -t.jump_speed
+                var_jump, var_jump_speed = t.var_jump_time, vy
+                force_time, force_dir = t.wall_jump_lock, away
+                facing = away
+                jump_buffer = 0.0
+                events.add("wall_jump")
 
-    sliding = (
-        not grounded and p.wall_dir != 0 and move_x == p.wall_dir and vy >= 0
-    )
-    if not grounded:
-        vy = _fall(vy, inp, t, dt, t.wall_slide_max if sliding else None)
-        if var_jump > 0:
-            if inp.jump:
-                vy = min(vy, var_jump_speed)
-            else:
-                var_jump = 0.0
-                if vy < 0:
-                    vy *= t.jump_cut
+        sliding = (
+            not grounded and p.wall_dir != 0 and move_x == p.wall_dir and vy >= 0
+        )
+        if not grounded:
+            vy = _fall(vy, inp, t, dt, t.wall_slide_max if sliding else None)
+            if var_jump > 0:
+                if inp.jump:
+                    vy = min(vy, var_jump_speed)
+                else:
+                    var_jump = 0.0
+                    if vy < 0:
+                        vy *= t.jump_cut
 
     moved = move_body(world, p.body, Vec2(vx * dt, vy * dt), blocks)
     body = moved.body
@@ -160,8 +199,14 @@ def step(
     if wall_dir != 0 and p.wall_dir == 0:
         events.add("wall_touch")
     wall_sliding = (
-        not on_ground and wall_dir != 0 and move_x == wall_dir and vy > 0
+        not on_ground
+        and not dashing
+        and wall_dir != 0
+        and move_x == wall_dir
+        and vy > 0
     )
+    if on_ground and not dashing:
+        dashes_left = t.dashes
 
     return replace(
         p,
@@ -169,6 +214,8 @@ def step(
         vel=Vec2(vx, vy),
         on_ground=on_ground,
         facing=facing,
+        dashing=dashing,
+        dashes_left=dashes_left,
         wall_dir=wall_dir,
         wall_sliding=wall_sliding,
         events=frozenset(events),
@@ -179,6 +226,9 @@ def step(
         var_jump_speed=var_jump_speed,
         force_time=force_time,
         force_dir=force_dir,
+        dash_buffer=dash_buffer,
+        dash_time=dash_time,
+        dash_dir=dash_dir,
     )
 
 
@@ -201,6 +251,15 @@ def _fall(
     if slide_cap is not None:
         cap = slide_cap
     return _approach(vy, cap, t.gravity * mult * dt)
+
+
+def _dash_dir(inp: Input, facing: int) -> Vec2:
+    if inp.x == 0 and inp.y == 0:
+        return Vec2(float(facing), 0.0)
+    if inp.x != 0 and inp.y != 0:
+        diag = 0.5**0.5
+        return Vec2(inp.x * diag, inp.y * diag)
+    return Vec2(float(inp.x), float(inp.y))
 
 
 def _wall_near(

@@ -295,5 +295,87 @@ class WallTest(unittest.TestCase):
         self.assertNotIn("wall_jump", p.events)
 
 
+OPEN = tuple(["." * 40] * 20 + ["#" * 40])
+
+
+def _dash_distance(world: World, p: Player, inp: Input) -> tuple[Player, float]:
+    """Dash with `inp`, then hold nothing until the dash ends; return x travelled."""
+    x0 = p.body.rect.x
+    p = step(p, inp, world, _blocks, DT)
+    while p.dashing:
+        p = step(p, IDLE, world, _blocks, DT)
+    return p, p.body.rect.x - x0
+
+
+class DashTest(unittest.TestCase):
+    def test_ground_dash_distance_and_exit_speed(self) -> None:
+        world = _world(*FLAT)
+        p, dist = _dash_distance(world, _on_floor(world, 2), _inp(dash_pressed=True))
+        print(f"\ndash distance (dash phase only): {dist:.1f}px ({dist / TILE:.2f} tiles)")
+        self.assertIn("dash_end", p.events)
+        self.assertAlmostEqual(dist, 960 * 0.15, delta=10)
+        self.assertAlmostEqual(p.vel.x, 640.0, delta=20)
+
+    def test_dash_ignores_gravity_and_input(self) -> None:
+        world = _world(*OPEN)
+        p = _run(spawn(5 * TILE, 5 * TILE), world, IDLE, 1)
+        y0 = p.body.rect.y
+        p = step(p, _inp(x=1, dash_pressed=True), world, _blocks, DT)
+        self.assertIn("dash", p.events)
+        for _ in range(10):
+            p = step(p, _inp(x=-1, y=1), world, _blocks, DT)
+            self.assertTrue(p.dashing)
+            self.assertAlmostEqual(p.vel.x, 960.0)
+            self.assertAlmostEqual(p.vel.y, 0.0)
+        self.assertLess(abs(p.body.rect.y - y0), 1.0)
+
+    def test_diagonal_up_dash_exit_is_damped(self) -> None:
+        world = _world(*OPEN)
+        p = _run(spawn(5 * TILE, 15 * TILE), world, IDLE, 1)
+        p, _ = _dash_distance(world, p, _inp(x=1, y=-1, dash_pressed=True))
+        diag = 640 * 0.5**0.5
+        self.assertAlmostEqual(p.vel.x, diag, delta=20)
+        self.assertLess(p.vel.y, 0.0)
+        self.assertGreater(p.vel.y, -0.75 * diag - 40)
+
+    def test_dash_refills_only_on_landing(self) -> None:
+        world = _world(*OPEN)
+        p = _run(spawn(5 * TILE, 10 * TILE), world, IDLE, 1)
+        self.assertEqual(p.dashes_left, 1)
+        p, _ = _dash_distance(world, p, _inp(dash_pressed=True))
+        self.assertEqual(p.dashes_left, 0)
+        p = step(p, _inp(dash_pressed=True), world, _blocks, DT)
+        self.assertNotIn("dash", p.events)
+        while not p.on_ground:
+            p = step(p, IDLE, world, _blocks, DT)
+        self.assertIn("land", p.events)
+        self.assertEqual(p.dashes_left, 1)
+
+    def test_dash_press_is_buffered(self) -> None:
+        world = _world(*OPEN)
+        p = _run(spawn(5 * TILE, 10 * TILE), world, IDLE, 1)
+        p, _ = _dash_distance(world, p, _inp(dash_pressed=True))
+        while _bottom(p) < 20 * TILE - 30:
+            p = step(p, IDLE, world, _blocks, DT)
+        p = step(p, _inp(dash_pressed=True), world, _blocks, DT)
+        self.assertNotIn("dash", p.events)
+        dashed = False
+        for _ in range(8):
+            p = step(p, IDLE, world, _blocks, DT)
+            dashed = dashed or "dash" in p.events
+        self.assertTrue(dashed)
+
+    def test_dash_jump_keeps_horizontal_speed(self) -> None:
+        world = _world(*FLAT)
+        p = _on_floor(world, 2)
+        p = _run(p, world, _inp(x=1, dash_pressed=True), 1)
+        p = _run(p, world, _inp(x=1), 5)
+        p = step(p, _inp(x=1, jump=True, jump_pressed=True), world, _blocks, DT)
+        self.assertIn("jump", p.events)
+        self.assertFalse(p.dashing)
+        self.assertAlmostEqual(p.vel.x, 960.0)
+        self.assertEqual(p.dashes_left, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
