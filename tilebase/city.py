@@ -24,9 +24,12 @@ from tilebase.play import (
     WEB,
     Ground,
     Held,
+    PLACE_DEADLINE,
     Latch,
     _codes,
     _frame_png,
+    _ink,
+    _same_words,
     axis,
     blocks,
     clamp_cam,
@@ -128,18 +131,15 @@ def _snow_cap(screen: object, origin: Vec2) -> None:
     pygame.draw.circle(screen, (186, 224, 255), (round(27 * TILE + 8 - origin.x), round(28 - origin.y)), 16)
 
 
-def draw_pocket(screen: object, stock: Stock) -> None:
-    """How many lifts the agent is still holding."""
+def draw_hud(screen: object, line: str, stock: Stock) -> None:
+    """Talk line on the left, pocket on the right. Bitmap glyphs, so it always shows."""
     import pygame
 
+    top = VIEW.h - 28
+    pygame.draw.rect(screen, (236, 224, 196), (0, top, VIEW.w, 28))
+    _ink(screen, line, 8, top + 6, scale=2)
     label = stock_line(stock) or "pocket empty"
-    pygame.draw.rect(screen, (16, 20, 32), (8, VIEW.h - 48, 220, 22))
-    try:
-        font = pygame.font.Font(None, 20)
-    except (NotImplementedError, pygame.error):
-        font = None
-    if font is not None:
-        screen.blit(font.render(label, True, (230, 236, 244)), (14, VIEW.h - 44))
+    _ink(screen, label, VIEW.w - 8 - 12 * len(label), top + 6, scale=2)
 
 
 def draw_scene(
@@ -158,26 +158,7 @@ def draw_scene(
         cell.draw(screen, Rect(rect.x - origin.x, rect.y - origin.y, rect.w, rect.h))
     _sign(screen, origin)
     _snow_cap(screen, origin)
-    draw_pocket(screen, stock)
-    bar = pygame.Rect(0, VIEW.h - 22, VIEW.w, 22)
-    pygame.draw.rect(screen, (236, 224, 196), bar)
-    try:
-        font = pygame.font.Font(None, 22)
-    except (NotImplementedError, pygame.error):
-        font = None
-    if font is not None:
-        screen.blit(font.render(line, True, (28, 24, 22)), (8, VIEW.h - 20))
-    if cleared:
-        banner = pygame.Rect(VIEW.w // 2 - 130, 16, 260, 28)
-        pygame.draw.rect(screen, (16, 24, 48), banner)
-        pygame.draw.rect(screen, (180, 210, 255), banner, 2)
-        try:
-            font = pygame.font.Font(None, 22)
-        except (NotImplementedError, pygame.error):
-            font = None
-        if font is not None:
-            text = font.render("Flag reached", True, (220, 235, 255))
-            screen.blit(text, text.get_rect(center=banner.center))
+    draw_hud(screen, line, stock)
 
 
 def main() -> None:
@@ -210,8 +191,8 @@ async def run_level(screen, audio=None) -> None:
     import pygame
 
     from tilebase import art, blob, player
-    from tilebase.agent import AgentMiss, Placed, ask, level_grid
-    from tilebase.contraptions import Refused
+    from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
+    from tilebase.speech import ListenError, Transcript
     from tilebase.tiles import glyph_rows
 
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
@@ -238,16 +219,30 @@ async def run_level(screen, audio=None) -> None:
     tick_no = 0
     prompt = ""
     asking = False
-    notice = "enter places a platform"
+    listening = False
+    notice = "enter type    v talk"
     place_job: asyncio.Task[object] | None = None
+    place_started = 0.0
+    guess_job: asyncio.Task[object] | None = None
+    guess_text = ""
+    heard: asyncio.Queue[object] = asyncio.Queue()
+    mic: asyncio.Task[None] | None = None
+    asyncio.create_task(asyncio.to_thread(warm))
     cam = clamp_cam(p.body.rect.center, level, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
 
-    def submit(text: str) -> None:
-        nonlocal notice, place_job
-        if place_job is not None:
-            return
+    async def _hear() -> None:
+        from tilebase.speech import listen
+
+        async for event in listen():
+            heard.put_nowait(event)
+            if isinstance(event, ListenError):
+                return
+            if isinstance(event, Transcript) and event.final:
+                return
+
+    def start_ask(text: str) -> asyncio.Task[object]:
         center = Vec2(
             p.body.rect.x + p.body.rect.w / 2,
             p.body.rect.y + p.body.rect.h / 2,
@@ -255,11 +250,36 @@ async def run_level(screen, audio=None) -> None:
         grid = level_grid(
             glyph_rows(level), (int(center.x // TILE), int(center.y // TILE))
         )
-        frame = _frame_png(canvas)
-        notice = "placing a lift"
-        place_job = asyncio.create_task(
-            asyncio.to_thread(ask, text, frame, stock, grid)
+        # The model takes coordinates from this list. These two holes are one lift each.
+        grid += (
+            "\n- open gap, place a lift here: cols 6-9, row 5"
+            "\n- open gap, place a lift here: cols 14-17, row 5\n"
         )
+        return asyncio.create_task(
+            asyncio.to_thread(ask, text, _frame_png(canvas), stock, grid)
+        )
+
+    def guess(text: str) -> None:
+        nonlocal guess_job, guess_text
+        if place_job is not None or len(text.split()) < 3:
+            return
+        if _same_words(text, guess_text):
+            return
+        guess_text = text
+        guess_job = start_ask(text)
+
+    def submit(text: str) -> None:
+        nonlocal notice, place_job, guess_job, guess_text, place_started
+        if place_job is not None:
+            return
+        notice = "placing"
+        place_started = pygame.time.get_ticks() / 1000.0
+        if guess_job is not None and _same_words(text, guess_text):
+            place_job = guess_job
+        else:
+            place_job = start_ask(text)
+        guess_job = None
+        guess_text = ""
 
     def finish_place(result: object) -> None:
         nonlocal level, stock, edited, notice
@@ -282,6 +302,12 @@ async def run_level(screen, audio=None) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and listening:
+                if event.key == pygame.K_ESCAPE:
+                    listening = False
+                    asking = False
+                    if mic is not None and not mic.done():
+                        mic.cancel()
             elif event.type == pygame.KEYDOWN and asking:
                 if event.key == pygame.K_ESCAPE:
                     asking = False
@@ -301,6 +327,11 @@ async def run_level(screen, audio=None) -> None:
                 elif event.key == pygame.K_RETURN:
                     asking = True
                     prompt = ""
+                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()):
+                    listening = True
+                    asking = True
+                    prompt = ""
+                    mic = asyncio.create_task(_hear())
                 elif event.key == pygame.K_r:
                     level, entities, start, p, cleared, edited, ground = reset()
                     stock = POCKET
@@ -315,13 +346,33 @@ async def run_level(screen, audio=None) -> None:
                 elif event.button in (1, 2):
                     latch = Latch(jump=latch.jump, dash=True)
 
+        while not heard.empty():
+            heard_event = heard.get_nowait()
+            if isinstance(heard_event, ListenError):
+                listening = False
+                asking = False
+                notice = heard_event.message
+            elif listening and isinstance(heard_event, Transcript):
+                prompt = heard_event.text
+                if not heard_event.final:
+                    guess(prompt.strip())
+                if heard_event.final:
+                    listening = False
+                    asking = False
+                    text = prompt.strip()
+                    prompt = ""
+                    if text:
+                        submit(text)
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
         if place_job is not None and place_job.done():
-            result = place_job.result()
+            job, place_job = place_job, None
+            error = job.exception()
+            finish_place(AgentMiss(f"model failed: {error}") if error else job.result())
+        elif place_job is not None and now - place_started > PLACE_DEADLINE:
             place_job = None
-            finish_place(result)
+            notice = "model timed out"
         held_keys = read_held(pygame, pygame.key.get_pressed(), pad)
         if asking or place_job is not None:
             held_keys = Held(False, False, False, False, False, False)
@@ -388,7 +439,9 @@ async def run_level(screen, audio=None) -> None:
         )
         if cleared:
             line = "you made it"
-        elif asking:
+        elif listening and not prompt:
+            line = "listening"
+        elif asking or listening:
             line = "> " + prompt + "_"
         else:
             line = notice
