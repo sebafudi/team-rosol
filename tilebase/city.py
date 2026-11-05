@@ -255,11 +255,12 @@ def main() -> None:
         pygame.quit()
 
 
-async def run_level(screen, audio=None) -> None:
-    """Play the cable lifts on an existing window. Esc closes the level."""
+async def run_level(screen, audio=None) -> str:
+    """Play the cable lifts on an existing window until Esc picks "menu" or "quit"."""
     import pygame
 
     from tilebase import art, blob, player
+    from tilebase.pause import draw_pause, pause_key
 
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
     level = world()
@@ -285,14 +286,30 @@ async def run_level(screen, audio=None) -> None:
     cam = clamp_cam(p.body.rect.center, level, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
+    paused = False
+    pause_pick = 0
+    outcome = "quit"
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif paused:
+                if event.type != pygame.KEYDOWN:
+                    continue
+                pause_pick, picked = pause_key(event.key, pause_pick)
+                if picked is not None:
+                    paused = False
+                if picked == "restart":
+                    p, movers, cleared = reset()
+                    prev_rect = p.body.rect
+                elif picked in ("menu", "quit"):
+                    outcome = picked
+                    running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    paused = True
+                    pause_pick = 0
                 elif event.key == pygame.K_r:
                     p, movers, cleared = reset()
                     prev_rect = p.body.rect
@@ -313,7 +330,9 @@ async def run_level(screen, audio=None) -> None:
         ix = axis(held.left, held.right)
         iy = axis(held.up, held.down)
 
-        if freeze > 0:
+        if paused:
+            n = 0
+        elif freeze > 0:
             freeze -= frame_dt
             n = 0
         else:
@@ -376,6 +395,8 @@ async def run_level(screen, audio=None) -> None:
             look,
             dashes_left=p.dashes_left,
         )
+        if paused:
+            draw_pause(canvas, pause_pick)
         _present_level(screen, canvas)
         pygame.display.flip()
         if WEB:
@@ -383,6 +404,7 @@ async def run_level(screen, audio=None) -> None:
         else:
             clock.tick(0 if _has_vsync(pygame) else 240)
         await asyncio.sleep(0)
+    return outcome
 
 
 def _present_level(screen, canvas) -> None:
