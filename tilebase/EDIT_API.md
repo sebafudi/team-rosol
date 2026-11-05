@@ -151,15 +151,69 @@ result = apply_edits(
 
 Stops at the first error and returns it. On success, returns all changed tiles.
 
-## Demo
+## Game Integration
 
-Run the included demo to see a complete example:
+For live game integration with queued edits and visual feedback:
+
+```python
+from tilebase.edit_integration import (
+    create_edit_state,
+    queue_edit,
+    apply_pending_edits,
+    update_highlights,
+    tile_rects,
+)
+
+# Initialize
+state = create_edit_state(world, entities)
+
+# Queue an edit (optionally with preview)
+state = queue_edit(state, Command(op="move", id="plat1", by=(0, -1)))
+
+# Apply all pending edits (returns results + updated state with highlights)
+state, results = apply_pending_edits(state)
+
+# Each frame: decay highlight timer
+state = update_highlights(state)
+
+# Render highlights (convert tile positions to rects)
+for rect in tile_rects(state.highlight_tiles, tile_size):
+    draw_highlight(screen, rect)
+```
+
+The `EditState` tracks the world, entities, pending edits, and highlight tiles with a frame counter for visual feedback.
+
+### Natural Language → Command
+
+`prompt_to_command` provides a simple stub for translating prompts:
+
+```python
+from tilebase.edit_integration import prompt_to_command
+
+cmd = prompt_to_command("raise the left platform", entities)
+if cmd:
+    state = queue_edit(state, cmd)
+```
+
+Replace the stub implementation with an actual parser or LLM call for production use.
+
+## Demos
+
+### Core API Demo
 
 ```bash
 python3 -m tilebase.edit_demo
 ```
 
-The demo creates a world with two platforms, moves one up by 2 tiles, verifies collision detection, and tests safety rejection.
+Creates a world with two platforms, moves one up by 2 tiles, verifies collision detection, and tests safety rejection.
+
+### Integration Demo
+
+```bash
+python3 -m tilebase.integration_demo
+```
+
+Shows queued edits, natural language prompts, and highlight tracking for game loop integration.
 
 ## Integration Notes
 
