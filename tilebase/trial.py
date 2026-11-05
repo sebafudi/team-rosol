@@ -9,8 +9,8 @@ each prompt has to count:
    A spring at its foot throws you high enough to dash onto the top.
 2. The lava lake is sixteen tiles wide, wider than any dash-jump. One stepping
    stone in the middle splits it into two jumps.
-3. The spike tunnel has a low roof, so you cannot arc over it. A dash carries
-   you about half way. You need somewhere to land in the middle.
+3. The spike tunnel is fourteen spikes long under a roof four tiles up, too
+   long to clear in one go. You need somewhere to land in the middle.
 
 The stock has one more contraption than there are tokens, so there is a spare
 choice, not a spare prompt. Tab shows the whole map so you can plan.
@@ -36,8 +36,8 @@ ROWS = (
     "#...................########..#......................################....#",
     "#...................########..#......................################....#",
     "#...................########..#......................################....#",
-    "#...................########..#......................################....#",
-    "#...................########..#......................################....#",
+    "#...................########..#..........................................#",
+    "#...................########..#..........................................#",
     "#...................########..........................................EE.#",
     "#...................########......................o...................EE.#",
     "###############################LLLLLLLLLLLLLLLL#######^^^^^^^^^^^^^^######",
