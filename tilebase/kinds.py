@@ -26,7 +26,7 @@ SPIKE_TOP = 0.68
 LEGEND = (
     "# stone solid, - wooden bridge solid, = gold platform you can jump up through, "
     "b crate solid, D door solid, ^ spikes kill, ~ ice solid and slippery, "
-    "o red spring solid and bounces you high, L lava kills on touch, "
+    "* red spring solid and bounces you high, L lava kills on touch, "
     "c cracked rock solid until you stand on it, E exit flag, . air, P player, B the box"
 )
 
@@ -98,8 +98,8 @@ TILES: tuple[TileDef, ...] = (
     define("b", id="block", draw=tile_drawer("block"), marks=frozenset({"blocks"})),
     define("D", id="door", draw=tile_drawer("door"), marks=frozenset({"blocks"})),
     define("^", id="spike", draw=spike_drawer(), marks=frozenset({"hazard"})),
-    define("~", id="ice", draw=_ice, marks=frozenset({"blocks", "slick"})),
-    define("o", id="spring", draw=_spring, marks=frozenset({"blocks", "bounce"})),
+    define("~", id="slippery_ice", draw=_ice, marks=frozenset({"blocks", "slick"})),
+    define("*", id="spring", draw=_spring, marks=frozenset({"blocks", "bounce"})),
     define("L", id="lava", draw=_lava, marks=frozenset({"burns"})),
     define("c", id="crumble", draw=_crumble, marks=frozenset({"blocks", "crumble"})),
     define("E", id="exit", draw=tile_drawer("exit"), marks=frozenset({"goal"})),
