@@ -253,7 +253,7 @@ async def run() -> None:
         audio.stop()
         pygame.quit()
         return
-    from tilebase.agent import AgentMiss, Placed, ask
+    from tilebase.agent import AgentMiss, Placed, ask, warm
     from tilebase.speech import ListenError, Transcript
     from tilebase.box import draw_marks, level_surface, open_level, overlaps_exit, place_box
     from tilebase.edit import EditSuccess
@@ -266,6 +266,10 @@ async def run() -> None:
     asking = False
     listening = False
     place_job: asyncio.Task[object] | None = None
+    # A call started on an interim transcript. If the final matches, it is used.
+    guess_job: asyncio.Task[object] | None = None
+    guess_text = ""
+    asyncio.create_task(asyncio.to_thread(warm))
     heard: asyncio.Queue[object] = asyncio.Queue()
     mic: asyncio.Task[None] | None = None
     notice = "name a tile   enter   v talk"
@@ -303,10 +307,7 @@ async def run() -> None:
             if isinstance(event, Transcript) and event.final:
                 return
 
-    def submit(text: str) -> None:
-        nonlocal notice, place_job
-        if place_job is not None:
-            return
+    def start_ask(text: str) -> asyncio.Task[object]:
         center = Vec2(
             p.body.rect.x + p.body.rect.w / 2,
             p.body.rect.y + p.body.rect.h / 2,
@@ -314,9 +315,28 @@ async def run() -> None:
         sheet = level_surface(
             world, entities, center, p, look, p.dashes_left
         )
-        frame = _frame_png(sheet)
+        return asyncio.create_task(asyncio.to_thread(ask, text, _frame_png(sheet)))
+
+    def guess(text: str) -> None:
+        nonlocal guess_job, guess_text
+        if place_job is not None or len(text.split()) < 3:
+            return
+        if _same_words(text, guess_text):
+            return
+        guess_text = text
+        guess_job = start_ask(text)
+
+    def submit(text: str) -> None:
+        nonlocal notice, place_job, guess_job, guess_text
+        if place_job is not None:
+            return
         notice = "placing the box"
-        place_job = asyncio.create_task(asyncio.to_thread(ask, text, frame))
+        if guess_job is not None and _same_words(text, guess_text):
+            place_job = guess_job
+        else:
+            place_job = start_ask(text)
+        guess_job = None
+        guess_text = ""
 
     def finish_place(result: object) -> None:
         nonlocal world, entities, edited, notice
@@ -394,6 +414,8 @@ async def run() -> None:
                 notice = event.message
             elif listening and isinstance(event, Transcript):
                 prompt = event.text
+                if not event.final:
+                    guess(prompt.strip())
                 if event.final:
                     listening = False
                     asking = False
@@ -583,6 +605,15 @@ def _ink(screen: object, message: str, x: int, y: int, scale: int) -> None:
                         (cursor + col * scale, y + row * scale, scale, scale),
                     )
         cursor += 6 * scale
+
+
+def _same_words(a: str, b: str) -> bool:
+    """Interim and final transcripts differ in case and punctuation only."""
+
+    def words(text: str) -> list[str]:
+        return "".join(c.lower() if c.isalnum() else " " for c in text).split()
+
+    return bool(a) and words(a) == words(b)
 
 
 def _frame_png(screen: object) -> bytes:
