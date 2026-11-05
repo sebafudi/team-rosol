@@ -2,9 +2,8 @@
 
 Run with `python -m tilebase.city`.
 
-The room follows the cable-lift screen: a left arch, ice shelves, a spiked
-alcove with the flag, and a stone bridge broken in two places. Enter a
-prompt and the agent places the left or right platform from its pocket.
+The room follows the cable-lift screen. A request places one elevator
+against the starting ledge. Stand on it and it carries you up to the bridge.
 """
 
 from __future__ import annotations
@@ -12,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import math
 
-from tilebase.contraptions import Placement, Stock, place, stock_line
+from tilebase.contraptions import Stock, stock_line
+from tilebase.movers import Mover, ride_step
 from tilebase.edit import Entities, define_entities
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import hurt_at, level_tiles, overlaps_mark
@@ -52,11 +52,11 @@ ROWS = (
     "..#..#......#....#..........~.",
     "..#..#......#..E.#..........#.",
     "..####......................#.",
-    "....##....####....####......#.",
+    "....##....############......#.",
     "....##......................#.",
-    "....##~~~~............~~~~..#.",
-    "....##~~~~............~~~~..##",
-    "....##~~~~............~~~~....",
+    "....##~~..............~~~~..#.",
+    "....##~~..............~~~~..##",
+    "....##~~..............~~~~....",
     "....##....................####",
     "...S..........................",
     "~~~~~~~~......................",
@@ -66,11 +66,8 @@ ROWS = (
     "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
 )
 
-# Two crossings, spent when the agent places them.
-POCKET: Stock = ("lift", "lift")
-# Demo drops. The model is not asked. The first request fills the left hole,
-# the second fills the hole under the flag. Each hole is exactly one lift.
-DEMO_LIFTS = ((6, 5), (14, 5))
+# One elevator. A request puts it against the starting ledge.
+POCKET: Stock = ("lift",)
 
 
 def world() -> World:
@@ -142,6 +139,36 @@ def draw_hud(screen: object, line: str, stock: Stock) -> None:
     _ink(screen, label, VIEW.w - 8 - 12 * len(label), top + 6, scale=2)
 
 
+def starting_lift() -> Mover:
+    """Sits against the snow ledge. Standing on it rides up to the bridge."""
+    home = 12 * TILE
+    return Mover(
+        "lift",
+        x=8 * TILE,
+        y=home,
+        w=2 * TILE,
+        h=24,
+        home=home,
+        goal=5 * TILE,
+        pulley=2 * TILE,
+        pause=2.5,
+    )
+
+
+def draw_lift(screen: object, mover: Mover, origin: Vec2) -> None:
+    import pygame
+
+    x = mover.x - origin.x
+    y = mover.y - origin.y
+    cx = x + mover.w / 2
+    pulley_y = mover.pulley - origin.y
+    pygame.draw.line(screen, (150, 96, 62), (round(cx), round(pulley_y)), (round(cx), round(y)), 3)
+    pygame.draw.circle(screen, (96, 64, 48), (round(cx), round(pulley_y)), 6)
+    body = pygame.Rect(round(x), round(y), round(mover.w), round(mover.h))
+    pygame.draw.rect(screen, (72, 80, 92), body)
+    pygame.draw.rect(screen, (176, 186, 198), body.inflate(-4, -4))
+
+
 def draw_scene(
     screen: object,
     level: World,
@@ -149,6 +176,7 @@ def draw_scene(
     cleared: bool,
     line: str,
     stock: Stock,
+    lifts: tuple[Mover, ...],
 ) -> None:
     import pygame
 
@@ -158,6 +186,8 @@ def draw_scene(
         cell.draw(screen, Rect(rect.x - origin.x, rect.y - origin.y, rect.w, rect.h))
     _sign(screen, origin)
     _snow_cap(screen, origin)
+    for mover in lifts:
+        draw_lift(screen, mover, origin)
     draw_hud(screen, line, stock)
 
 
@@ -205,6 +235,7 @@ async def run_level(screen, audio=None) -> None:
 
     level, entities, start, p, cleared, edited, ground = reset()
     stock = POCKET
+    lifts: tuple[Mover, ...] = ()
     prev_rect = p.body.rect
     look = blob.rest()
     puffs = blob.no_puffs()
@@ -254,21 +285,15 @@ async def run_level(screen, audio=None) -> None:
         demo_at = pygame.time.get_ticks() / 1000.0 + 0.8
 
     def drop_demo_lift() -> None:
-        nonlocal level, stock, edited, notice, demo_at
+        nonlocal stock, edited, notice, demo_at, lifts
         demo_at = 0.0
-        index = len(DEMO_LIFTS) - stock.count("lift")
-        if index < 0 or index >= len(DEMO_LIFTS) or "lift" not in stock:
+        if "lift" not in stock or lifts:
             notice = "no lifts left"
             return
-        col, row = DEMO_LIFTS[index]
-        placed = place(level, entities, stock, "lift", col, row, p.body.rect)
-        if isinstance(placed, Placement):
-            level = placed.world
-            stock = placed.stock
-            edited = True
-            notice = f"lift at {col},{row}"
-        else:
-            notice = placed.reason
+        lifts = (starting_lift(),)
+        stock = stock[1:]
+        edited = True
+        notice = "lift ready"
 
     running = True
     while running:
@@ -308,6 +333,7 @@ async def run_level(screen, audio=None) -> None:
                 elif event.key == pygame.K_r:
                     level, entities, start, p, cleared, edited, ground = reset()
                     stock = POCKET
+                    lifts = ()
                     demo_at = 0.0
                     prev_rect = p.body.rect
                 if event.key in jump_codes:
@@ -375,7 +401,7 @@ async def run_level(screen, audio=None) -> None:
             latch = Latch()
             prev_rect = p.body.rect
             prev_vel = p.vel
-            p = player.step(p, inp, level, blocks, TICK)
+            p, lifts = ride_step(p, lifts, level, blocks, inp, TICK)
             p, level, ground = ground_effects(p, prev_vel, level, ground, TICK)
             tick_no += 1
             if audio is not None:
@@ -422,7 +448,7 @@ async def run_level(screen, audio=None) -> None:
         else:
             line = notice
         art.draw_backdrop(canvas, cam, Size(level.cols * TILE, level.rows * TILE), VIEW)
-        draw_scene(canvas, level, origin, cleared, line, stock)
+        draw_scene(canvas, level, origin, cleared, line, stock, lifts)
         blob.draw_puffs(canvas, puffs, origin)
         art.draw_player(
             canvas,
