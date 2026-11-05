@@ -20,10 +20,12 @@ from tilebase.credits import InsufficientCredits, charge, finite_ledger, grant
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
-from tilebase.tiles import Cell, World, cells_overlapping, define, load_map, put_cell
+from tilebase.tiles import Cell, World, cells_overlapping, define, glyph_rows, load_map, put_cell
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
+# Two 10 s socket attempts plus slack. Past this, "placing" gives up.
+PLACE_DEADLINE = 25.0
 VIEW = Size(640, 360)
 WINDOW_SCALE = 2
 TICK = 1.0 / 120.0
@@ -253,10 +255,9 @@ async def run() -> None:
         audio.stop()
         pygame.quit()
         return
-    from tilebase.agent import AgentMiss, Placed, ask, warm
+    from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
     from tilebase.speech import ListenError, Transcript
     from tilebase.box import level_surface, open_level, overlaps_exit
-    from tilebase.kinds import grid_text
     from tilebase.contraptions import Placement, place, stock_line
 
     priced = choice == "mint"
@@ -271,6 +272,7 @@ async def run() -> None:
     asking = False
     listening = False
     place_job: asyncio.Task[object] | None = None
+    place_started = 0.0
     # A call started on an interim transcript. If the final matches, it is used.
     guess_job: asyncio.Task[object] | None = None
     guess_text = ""
@@ -318,9 +320,11 @@ async def run() -> None:
             p.body.rect.y + p.body.rect.h / 2,
         )
         sheet = level_surface(world, center, p, look, p.dashes_left)
-        grid = grid_text(world, p.body.rect)
+        grid = level_grid(
+            glyph_rows(world), (int(center.x // TILE), int(center.y // TILE))
+        )
         return asyncio.create_task(
-            asyncio.to_thread(ask, text, _frame_png(sheet), grid, stock)
+            asyncio.to_thread(ask, text, _frame_png(sheet), stock, grid)
         )
 
     def guess(text: str) -> None:
@@ -340,7 +344,7 @@ async def run() -> None:
         return True
 
     def submit(text: str) -> None:
-        nonlocal notice, place_job, guess_job, guess_text, ledger
+        nonlocal notice, place_job, guess_job, guess_text, ledger, place_started
         if place_job is not None:
             return
         if priced:
@@ -350,6 +354,7 @@ async def run() -> None:
                 return
             ledger = paid.ledger
         notice = "placing"
+        place_started = pygame.time.get_ticks() / 1000.0
         if guess_job is not None and _same_words(text, guess_text):
             place_job = guess_job
         else:
@@ -451,9 +456,13 @@ async def run() -> None:
         frame_dt = now - last
         last = now
         if place_job is not None and place_job.done():
-            result = place_job.result()
+            job, place_job = place_job, None
+            error = job.exception()
+            finish_place(AgentMiss(f"model failed: {error}") if error else job.result())
+        elif place_job is not None and now - place_started > PLACE_DEADLINE:
+            # The thread keeps running, but its answer is dropped.
             place_job = None
-            finish_place(result)
+            notice = "model timed out"
         held = read_held(pygame, pygame.key.get_pressed(), pad)
         if asking or place_job is not None:
             held = Held(False, False, False, False, False, False)

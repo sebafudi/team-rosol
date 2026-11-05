@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,26 +38,68 @@ PROVIDERS = {
 }
 
 SYSTEM = (
-    "You place one contraption on the level. "
-    "You get an image of the entire level, 30 tiles wide and 9 tall, and the same level as a text grid. "
-    "The grid is exact: take every col and row from it, never from pixel positions in the image. "
-    "Each grid character is one tile. The ruler above the rows gives the column, and the label before a row gives the row. "
-    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
+    "You place one contraption on the level in the image. "
+    "The image is the entire level, 30 tiles wide and 9 tiles tall. "
+    "Each tile is 32 by 32 pixels. "
     "Contraptions are one-time use: the user message lists the ones still left. "
     "You have one tool, place_contraption. name picks the contraption. "
-    "col and row are its top-left tile, and it covers the width and height listed for it from there. "
-    "Every tile it covers must be air (.) or spikes (^) or lava (L). "
-    "It can never cover stone, a bridge, a platform, a crate, a door, a spring, cracked rock, the exit (E), or the player (P). "
-    "Check each covered tile in the grid before you answer. "
-    "Spikes and lava kill. The gold platform can be jumped up through. Ice is solid and slippery. "
-    "The spring is solid and bounces the player high. Cracked rock falls when stood on. "
+    "col and row are its top-left tile. "
+    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
+    "A contraption can only go on air or on spikes or lava, never on solid tiles, the exit, or the player. "
+    "Stone, the wooden bridge, the crate, and the barred door are solid. "
+    "The gold platform can be jumped up through. Spikes kill. The green flag is the exit. "
+    "Pale blue ice is solid and slippery. The red spring on a coil is solid and bounces you high. "
+    "Glowing orange-red lava kills on touch. Brown cracked rock is solid but falls when stood on. "
+    "The character is the player. "
     "Pick the contraption that fits what the player asks for and put it on the thing they name. "
-    "To cover something on the floor, put the contraption in the row above the floor. "
-    "Unless the player asks for the air, rest the contraption on the floor or on a solid tile, not floating. "
-    "The grid is followed by every named tile run with its row and columns: use those numbers. "
+    "The floor is the bottom row, so covering a floor tile uses the row above it. "
     "If they do not name a place or a contraption, cover the spikes with whatever fits. "
+    "Do not cover the player or the exit. "
+    "The user message also has the level as a text grid with column numbers on top and row numbers on the left. "
+    "Below the grid is a list of landmarks with their columns and rows already counted. Take col and row from that list, not by measuring the image. "
+    "Grid key: . air, # stone, - wooden bridge, = gold platform, b crate, D door, ^ spikes, "
+    "~ ice, * spring, L lava, c cracked rock, E exit, P the player. "
     "Call the tool once."
 )
+
+
+def level_grid(rows: tuple[str, ...], player: tuple[int, int] | None = None) -> str:
+    """Rows with a two-line column ruler and row numbers, P on the player's tile."""
+    width = len(rows[0]) if rows else 0
+    tens = "".join(str(c // 10) if c >= 10 else " " for c in range(width))
+    ones = "".join(str(c % 10) for c in range(width))
+    lines = [f"   {tens}", f"   {ones}"]
+    for r, row in enumerate(rows):
+        if player is not None and player[1] == r:
+            col = player[0]
+            row = row[:col] + "P" + row[col + 1 :]
+        lines.append(f"{r:>2} {row}")
+    return "\n".join(lines) + "\n\nLandmarks:\n" + landmarks(rows, player)
+
+
+_NAMES = {
+    "-": "wooden bridge", "=": "gold platform", "b": "crate", "D": "door", "^": "spikes",
+    "~": "ice", "*": "spring", "L": "lava", "c": "cracked rock", "E": "exit",
+}
+
+
+def landmarks(rows: tuple[str, ...], player: tuple[int, int] | None = None) -> str:
+    """Each horizontal run of a named tile, with its columns and row already counted."""
+    lines = []
+    for r, row in enumerate(rows):
+        c = 0
+        while c < len(row):
+            ch = row[c]
+            end = c
+            while end + 1 < len(row) and row[end + 1] == ch:
+                end += 1
+            if ch in _NAMES:
+                cols = f"col {c}" if c == end else f"cols {c}-{end}"
+                lines.append(f"- {_NAMES[ch]}: {cols}, row {r}")
+            c = end + 1
+    if player is not None:
+        lines.append(f"- player: col {player[0]}, row {player[1]}")
+    return "\n".join(lines)
 
 
 def tool(stock: Stock) -> dict:
@@ -119,20 +162,28 @@ def provider() -> Provider:
 
 
 _lock = threading.Lock()
-_idle: dict[str, list[http.client.HTTPSConnection]] = {}
+# (connection, when it went idle). Idle keep-alives die quietly at the far end,
+# and writing into a dead one stalls until the socket timeout, so old ones are dropped.
+_idle: dict[str, list[tuple[http.client.HTTPSConnection, float]]] = {}
+MAX_IDLE = 20.0
+TIMEOUT = 10.0
 
 
 def _take(host: str) -> http.client.HTTPSConnection:
+    now = time.monotonic()
     with _lock:
         pool = _idle.setdefault(host, [])
-        if pool:
-            return pool.pop()
-    return http.client.HTTPSConnection(host, timeout=45)
+        while pool:
+            conn, since = pool.pop()
+            if now - since <= MAX_IDLE:
+                return conn
+            conn.close()
+    return http.client.HTTPSConnection(host, timeout=TIMEOUT)
 
 
 def _give(host: str, conn: http.client.HTTPSConnection) -> None:
     with _lock:
-        _idle.setdefault(host, []).append(conn)
+        _idle.setdefault(host, []).append((conn, time.monotonic()))
 
 
 def _post(host: str, path: str, body: bytes, headers: dict) -> tuple[int, str]:
@@ -168,8 +219,8 @@ def warm() -> None:
     _give(host, conn)
 
 
-def ask(prompt: str, level_png: bytes, grid: str, stock: Stock) -> Placed | AgentMiss:
-    """Send the whole level as a PNG and a coordinate grid, the stock left, and the player's sentence."""
+def ask(prompt: str, level_png: bytes, stock: Stock, grid: str = "") -> Placed | AgentMiss:
+    """Send a PNG of the whole level, its text grid, the stock left, and the player's sentence."""
     if not stock:
         return AgentMiss("no contraptions left")
     chosen = provider()
@@ -187,13 +238,7 @@ def ask(prompt: str, level_png: bytes, grid: str, stock: Stock) -> Placed | Agen
         # Image before text: the unchanged level is a cacheable prefix.
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {
-                "role": "user",
-                "content": [
-                    image,
-                    {"type": "text", "text": f"Grid:\n{grid}\n\nLeft: {describe(stock)}.\n{prompt}"},
-                ],
-            },
+            {"role": "user", "content": [image, {"type": "text", "text": f"Level grid:\n{grid}\n\nLeft: {describe(stock)}.\n{prompt}"}]},
         ],
         "tools": [tool(stock)],
         "tool_choice": {"type": "function", "function": {"name": "place_contraption"}},

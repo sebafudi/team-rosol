@@ -28,12 +28,9 @@ sys.path.insert(0, str(ROOT))
 import websockets  # noqa: E402
 
 from tilebase import agent, speech  # noqa: E402
-from tilebase.contraptions import STARTING_STOCK as STOCK, Placement, place  # noqa: E402
+from tilebase.contraptions import STARTING_STOCK as STOCK  # noqa: E402
 from tilebase.play import _same_words  # noqa: E402
 
-GRID = ""
-LEVEL = None
-PLAYER = None
 CHUNK_SECONDS = 0.1
 SILENCE_LIMIT = 4.0
 
@@ -51,23 +48,20 @@ def _speech_end(frames: bytes, rate: int) -> float:
 
 
 def _level_png() -> bytes:
-    global GRID, LEVEL, PLAYER
     import pygame
 
     from tilebase import blob, player
     from tilebase.box import level_surface, open_level
     from tilebase.geom import Vec2
-    from tilebase.kinds import grid_text
     from tilebase.play import _frame_png
 
     pygame.init()
     pygame.display.set_mode((1, 1))
-    LEVEL = open_level()
-    p = player.spawn(LEVEL.spawn.x, LEVEL.spawn.y)
-    PLAYER = p.body.rect
-    GRID = grid_text(LEVEL.world, PLAYER)
-    center = Vec2(PLAYER.x + PLAYER.w / 2, PLAYER.y + PLAYER.h / 2)
-    sheet = level_surface(LEVEL.world, center, p, blob.rest(), p.dashes_left)
+    level = open_level()
+    p = player.spawn(level.spawn.x, level.spawn.y)
+    rect = p.body.rect
+    center = Vec2(rect.x + rect.w / 2, rect.y + rect.h / 2)
+    sheet = level_surface(level.world, center, p, blob.rest(), p.dashes_left)
     return _frame_png(sheet)
 
 
@@ -108,12 +102,12 @@ async def _stt(frames: bytes, rate: int, png: bytes) -> dict:
                 if not event.final:
                     if len(event.text.split()) >= 3 and not _same_words(event.text, guess_text):
                         guess_text = event.text
-                        guess = asyncio.create_task(asyncio.to_thread(agent.ask, guess_text, png, GRID, STOCK))
+                        guess = asyncio.create_task(asyncio.to_thread(agent.ask, guess_text, png, STOCK))
                     continue
                 out["text"] = event.text
                 out["final_at"] = time.perf_counter()
                 out["guess_hit"] = guess is not None and _same_words(event.text, guess_text)
-                job = guess if out["guess_hit"] else asyncio.to_thread(agent.ask, event.text, png, GRID, STOCK)
+                job = guess if out["guess_hit"] else asyncio.to_thread(agent.ask, event.text, png, STOCK)
                 out["result"] = await job
                 out["placed_at"] = time.perf_counter()
                 break
@@ -125,19 +119,13 @@ async def _stt(frames: bytes, rate: int, png: bytes) -> dict:
 
 
 def _in_gap(result: object) -> bool:
-    """The game accepts the placement and it covers part of the pit (cols 9-16)."""
-    if not isinstance(result, agent.Placed):
-        return False
-    placed = place(LEVEL.world, LEVEL.entities, STOCK, result.name, result.col, result.row, PLAYER)
-    if not isinstance(placed, Placement):
-        return False
-    width = agent.contraption(result.name).cols
-    return result.col + width > 9 and result.col <= 16
+    """The contraption hangs over the floor gap (cols 4-11) with air on both sides."""
+    return isinstance(result, agent.Placed) and 5 <= result.col <= 9 and result.row in (6, 7)
 
 
 def run_model(text: str, png: bytes) -> dict:
     asked = time.perf_counter()
-    result = agent.ask(text, png, GRID, STOCK)
+    result = agent.ask(text, png, STOCK)
     took = time.perf_counter() - asked
     return {"text": text, "result": repr(result), "ok": _in_gap(result), "model": took, "total_after_speech": took}
 
