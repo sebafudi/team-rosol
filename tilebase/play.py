@@ -209,6 +209,7 @@ async def run() -> None:
     prompt = ""
     asking = False
     listening = False
+    place_job: asyncio.Task[object] | None = None
     heard: asyncio.Queue[object] = asyncio.Queue()
     mic: asyncio.Task[None] | None = None
     notice = "enter type    v talk"
@@ -246,7 +247,9 @@ async def run() -> None:
                 return
 
     def submit(text: str) -> None:
-        nonlocal world, entities, edited, notice
+        nonlocal notice, place_job
+        if place_job is not None:
+            return
         center = Vec2(
             p.body.rect.x + p.body.rect.w / 2,
             p.body.rect.y + p.body.rect.h / 2,
@@ -256,9 +259,10 @@ async def run() -> None:
         )
         frame = _frame_png(sheet)
         notice = "placing the box"
-        _bar(screen, notice)
-        pygame.display.flip()
-        result = ask(text, frame)
+        place_job = asyncio.create_task(asyncio.to_thread(ask, text, frame))
+
+    def finish_place(result: object) -> None:
+        nonlocal world, entities, edited, notice
         if isinstance(result, Placed):
             edit = place_box(world, entities, result.col, result.row)
             if isinstance(edit, EditSuccess):
@@ -343,8 +347,12 @@ async def run() -> None:
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
+        if place_job is not None and place_job.done():
+            result = place_job.result()
+            place_job = None
+            finish_place(result)
         held = read_held(pygame, pygame.key.get_pressed(), pad)
-        if asking:
+        if asking or place_job is not None:
             held = Held(False, False, False, False, False, False)
             latch = Latch()
         ix = axis(held.left, held.right)
