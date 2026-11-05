@@ -377,5 +377,128 @@ class DashTest(unittest.TestCase):
         self.assertEqual(p.dashes_left, 1)
 
 
+CEILING_BLOCK = (
+    "................",
+    "................",
+    "................",
+    ".....#..........",
+    "................",
+    "................",
+    "################",
+)
+BLOCK_RIGHT = 6 * TILE
+
+
+def _jump_under_block(overlap: float) -> Player:
+    """Jump straight up with the head overlapping the block's right edge."""
+    world = _world(*CEILING_BLOCK)
+    p = _run(spawn(BLOCK_RIGHT - overlap, FLOOR_Y - 22), world, IDLE, 2)
+    p = step(p, _inp(jump=True, jump_pressed=True), world, _blocks, DT)
+    for _ in range(30):
+        p = step(p, _inp(jump=True), world, _blocks, DT)
+        if "bonk" in p.events or p.body.rect.y < 3 * TILE:
+            break
+    return p
+
+
+STEP_UP = (
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..........######",
+    "################",
+)
+STEP_X = 10 * TILE
+STEP_TOP = 5 * TILE
+
+
+def _airborne_into_step(lip: float) -> Player:
+    """Moving right while the body's bottom is `lip` px below the step's top."""
+    world = _world(*STEP_UP)
+    t = Tuning()
+    p = spawn(STEP_X - t.width - 1, STEP_TOP + lip - t.height)
+    p = replace(p, vel=Vec2(360.0, 0.0))
+    return _run(p, world, _inp(x=1), 12)
+
+
+EDGE = (
+    "................",
+    "................",
+    "................",
+    "................",
+    "#####...........",
+    "................",
+    "................",
+    "################",
+)
+EDGE_X = 5 * TILE
+
+
+def _perched(supported: float) -> Player:
+    world = _world(*EDGE)
+    t = Tuning()
+    return spawn(EDGE_X - supported, 4 * TILE - t.height)
+
+
+class CornerTest(unittest.TestCase):
+    def test_head_slips_past_a_ceiling_corner(self) -> None:
+        p = _jump_under_block(overlap=8)
+        self.assertNotIn("bonk", p.events)
+        self.assertGreaterEqual(p.body.rect.x, BLOCK_RIGHT)
+        self.assertLess(p.body.rect.y, 3 * TILE)
+
+    def test_bonks_when_overlap_is_too_deep(self) -> None:
+        p = _jump_under_block(overlap=16)
+        self.assertIn("bonk", p.events)
+        self.assertEqual(p.vel.y, 0.0)
+
+    def test_round_body_pops_over_a_small_lip(self) -> None:
+        p = _airborne_into_step(lip=7)
+        self.assertGreater(p.body.rect.x, STEP_X)
+        self.assertLessEqual(_bottom(p), STEP_TOP + 1e-6)
+        self.assertGreater(p.vel.x, 300.0)
+
+    def test_tall_lip_still_blocks(self) -> None:
+        p = _airborne_into_step(lip=14)
+        self.assertLessEqual(p.body.rect.x + p.body.rect.w, STEP_X + 1e-6)
+        self.assertEqual(p.vel.x, 0.0)
+
+
+class RoundBodyTest(unittest.TestCase):
+    def test_idle_blob_rolls_off_a_thin_edge(self) -> None:
+        world = _world(*EDGE)
+        p = _run(_perched(supported=5), world, IDLE, 1)
+        self.assertIn("edge_nudge", p.events)
+        self.assertGreater(p.vel.x, 0.0)
+        p = _run(p, world, IDLE, 30)
+        self.assertFalse(p.on_ground)
+        self.assertGreater(p.body.rect.x, EDGE_X)
+
+    def test_holding_a_direction_disables_the_nudge(self) -> None:
+        world = _world(*EDGE)
+        p = _run(_perched(supported=5), world, _inp(x=-1), 1)
+        self.assertNotIn("edge_nudge", p.events)
+        self.assertLess(p.vel.x, 0.0)
+
+    def test_well_supported_blob_stays_put(self) -> None:
+        world = _world(*EDGE)
+        start = _perched(supported=10)
+        p = _run(start, world, IDLE, 30)
+        self.assertTrue(p.on_ground)
+        self.assertAlmostEqual(p.body.rect.x, start.body.rect.x)
+
+    def test_hard_landing_keeps_horizontal_speed(self) -> None:
+        world = _world(*OPEN)
+        p = replace(spawn(2 * TILE, 0), vel=Vec2(600.0, 0.0))
+        while not p.on_ground:
+            p = step(p, _inp(x=1, y=1), world, _blocks, DT)
+        self.assertGreater(p.impact, 700.0)
+        landed_vx = p.vel.x
+        p = step(p, _inp(x=1), world, _blocks, DT)
+        self.assertAlmostEqual(p.vel.x, landed_vx)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from tilebase.geom import Rect, Vec2
-from tilebase.move import Blocks, Body, move_body
-from tilebase.tiles import World
+from tilebase.move import Blocks, Body, Moved, move_body
+from tilebase.tiles import World, cells_overlapping
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,11 @@ class Tuning:
     dash_end_speed: float = 640.0
     dash_up_mult: float = 0.75
     dash_buffer_time: float = 0.08
+    corner_correction: float = 10.0
+    ledge_pop: float = 8.0
+    edge_support: float = 0.35
+    edge_nudge_speed: float = 120.0
+    hard_landing: float = 700.0
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,7 @@ class Player:
     dash_buffer: float = 0.0
     dash_time: float = 0.0
     dash_dir: Vec2 = Vec2(0.0, 0.0)
+    nudging: bool = False
 
 
 def spawn(x: float, y: float, tuning: Tuning = Tuning()) -> Player:
@@ -119,6 +125,7 @@ def step(
     move_x = 0 if force_dir != 0 and inp.x == -force_dir else inp.x
     dashing, dash_dir, dashes_left = p.dashing, p.dash_dir, p.dashes_left
     dash_time = max(0.0, p.dash_time - dt)
+    nudging = False
 
     if dashing and dash_time <= 1e-9:
         dashing = False
@@ -146,7 +153,20 @@ def step(
             jump_buffer, coyote, grounded = 0.0, 0.0, False
             events.update(("dash_end", "jump"))
     else:
-        vx = _run(vx, move_x, grounded, t, dt)
+        # A hard landing while steering keeps all momentum: the ball rolls on.
+        hard_landing = (
+            "land" in p.events and p.impact > t.hard_landing and inp.x != 0
+        )
+        if not hard_landing:
+            vx = _run(vx, move_x, grounded, t, dt)
+        if grounded and inp.x == 0:
+            roll = _edge_roll(world, p.body, t.edge_support, blocks)
+            if roll != 0:
+                nudging = True
+                if _sign(vx) != roll or abs(vx) < t.edge_nudge_speed:
+                    vx = roll * t.edge_nudge_speed
+                if not p.nudging:
+                    events.add("edge_nudge")
         if jump_buffer > 0 and (grounded or coyote > 0):
             vy = -t.jump_speed
             vx += t.jump_h_boost * inp.x
@@ -177,7 +197,12 @@ def step(
                     if vy < 0:
                         vy *= t.jump_cut
 
-    moved = move_body(world, p.body, Vec2(vx * dt, vy * dt), blocks)
+    delta = Vec2(vx * dt, vy * dt)
+    moved = move_body(world, p.body, delta, blocks)
+    if moved.blocked_y and vy < 0:
+        moved = _slip_corner(world, p.body, delta, t.corner_correction, blocks) or moved
+    if moved.blocked_x and vx != 0 and (dashing or not grounded):
+        moved = _pop_ledge(world, p.body, delta, t.ledge_pop, blocks) or moved
     body = moved.body
     fall_speed = vy
     if moved.blocked_x:
@@ -229,6 +254,7 @@ def step(
         dash_buffer=dash_buffer,
         dash_time=dash_time,
         dash_dir=dash_dir,
+        nudging=nudging,
     )
 
 
@@ -260,6 +286,53 @@ def _dash_dir(inp: Input, facing: int) -> Vec2:
         diag = 0.5**0.5
         return Vec2(inp.x * diag, inp.y * diag)
     return Vec2(float(inp.x), float(inp.y))
+
+
+def _slip_corner(
+    world: World, body: Body, delta: Vec2, reach: float, blocks: Blocks
+) -> Moved | None:
+    """Head clipped a ceiling corner: shift sideways (toward travel first) to clear it."""
+    first = _sign(delta.x) or 1
+    for offset in range(1, int(reach) + 1):
+        for side in (first, -first):
+            shifted = move_body(world, body, Vec2(side * offset, 0), blocks)
+            if shifted.blocked_x:
+                continue
+            moved = move_body(world, shifted.body, delta, blocks)
+            if not moved.blocked_y:
+                return moved
+    return None
+
+
+def _pop_ledge(
+    world: World, body: Body, delta: Vec2, reach: float, blocks: Blocks
+) -> Moved | None:
+    """Blocked by a lip at most `reach` px tall: the round body rolls up onto it."""
+    for lift in range(1, int(reach) + 1):
+        lifted = move_body(world, body, Vec2(0, -lift), blocks)
+        if lifted.blocked_y:
+            return None
+        across = move_body(world, lifted.body, Vec2(delta.x, 0), blocks)
+        if not across.blocked_x:
+            down = move_body(world, across.body, Vec2(0, delta.y), blocks)
+            return Moved(down.body, False, down.blocked_y)
+    return None
+
+
+def _edge_roll(world: World, body: Body, min_support: float, blocks: Blocks) -> int:
+    """Direction to roll off a ledge when too little of the body is supported."""
+    r = body.rect
+    feet = Rect(r.x, r.y + r.h, r.w, 1.0)
+    spans = [
+        (max(r.x, c.rect.x), min(r.x + r.w, c.rect.x + c.rect.w))
+        for c in cells_overlapping(world, feet)
+        if blocks(c, body, Vec2(0.0, 1.0))
+    ]
+    support = sum(hi - lo for lo, hi in spans)
+    if support <= 0 or support >= min_support * r.w:
+        return 0
+    middle = sum((lo + hi) / 2 * (hi - lo) for lo, hi in spans) / support
+    return 1 if r.center.x > middle else -1
 
 
 def _wall_near(
