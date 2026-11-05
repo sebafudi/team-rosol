@@ -197,14 +197,25 @@ async def run() -> None:
         audio.stop()
         pygame.quit()
         return
-    from tilebase.demo import world as demo_world
+    from tilebase.agent import AgentMiss, Placed, ask
+    from tilebase.speech import ListenError, Transcript
+    from tilebase.box import draw_marks, open_level, overlaps_exit, place_box, render_map
+    from tilebase.edit import EditSuccess
 
-    font = None
-    world = demo_world()
-    # Collected tokens fill the balance a voice edit will spend later.
+    level = open_level()
+    world = level.world
+    entities = level.entities
+    start = level.spawn
+    prompt = ""
+    asking = False
+    listening = False
+    heard: asyncio.Queue[object] = asyncio.Queue()
+    mic: asyncio.Task[None] | None = None
+    notice = "enter type    v talk"
+    edited = False
+    cleared = False
     ledger = finite_ledger(0)
     counter = CounterLook()
-    start = Vec2(TILE * 2, world.rows * TILE - TILE - 22)
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
@@ -224,14 +235,70 @@ async def run() -> None:
     cam = clamp_cam(p.body.rect.center, world, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
+    async def _hear() -> None:
+        from tilebase.speech import listen
+
+        async for event in listen():
+            heard.put_nowait(event)
+            if isinstance(event, ListenError):
+                return
+            if isinstance(event, Transcript) and event.final:
+                return
+
+    def submit(text: str) -> None:
+        nonlocal world, entities, edited, notice
+        frame = _frame_png(screen)
+        notice = "placing the box"
+        _bar(screen, notice)
+        pygame.display.flip()
+        result = ask(text, render_map(world, entities, p.body.rect), frame)
+        if isinstance(result, Placed):
+            edit = place_box(world, entities, result.col, result.row)
+            if isinstance(edit, EditSuccess):
+                world = edit.world
+                entities = edit.entities
+                edited = True
+                notice = f"box at {result.col},{result.row}"
+            else:
+                notice = type(edit).__name__
+        elif isinstance(result, AgentMiss):
+            notice = result.message
+
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and listening:
+                if event.key == pygame.K_ESCAPE:
+                    listening = False
+                    asking = False
+                    if mic is not None and not mic.done():
+                        mic.cancel()
+            elif event.type == pygame.KEYDOWN and asking:
+                if event.key == pygame.K_ESCAPE:
+                    asking = False
+                elif event.key == pygame.K_RETURN:
+                    text = prompt.strip()
+                    prompt = ""
+                    asking = False
+                    if text:
+                        submit(text)
+                elif event.key == pygame.K_BACKSPACE:
+                    prompt = prompt[:-1]
+                elif event.unicode.isprintable():
+                    prompt += event.unicode
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_RETURN:
+                    asking = True
+                    prompt = ""
+                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()):
+                    listening = True
+                    asking = True
+                    prompt = ""
+                    mic = asyncio.create_task(_hear())
                 elif event.key == pygame.K_r:
                     p = player.spawn(start.x, start.y)
                     prev_rect = p.body.rect
@@ -251,10 +318,28 @@ async def run() -> None:
             elif event.type == pygame.JOYDEVICEADDED and pad is None:
                 pad = pygame.joystick.Joystick(event.device_index)
 
+        while not heard.empty():
+            event = heard.get_nowait()
+            if isinstance(event, ListenError):
+                listening = False
+                asking = False
+                notice = event.message
+            elif listening and isinstance(event, Transcript):
+                prompt = event.text
+                if event.final:
+                    listening = False
+                    asking = False
+                    text = prompt.strip()
+                    prompt = ""
+                    if text:
+                        submit(text)
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
         held = read_held(pygame, pygame.key.get_pressed(), pad)
+        if asking:
+            held = Held(False, False, False, False, False, False)
+            latch = Latch()
         ix = axis(held.left, held.right)
         iy = axis(held.up, held.down)
 
@@ -295,6 +380,8 @@ async def run() -> None:
                 shake = max(shake, 0.2)
                 p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
+            elif edited and overlaps_exit(p.body.rect, entities):
+                cleared = True
 
         alpha = 0.0 if freeze > 0 else acc / TICK
         draw_x = lerp(prev_rect.x, p.body.rect.x, alpha)
@@ -324,30 +411,136 @@ async def run() -> None:
             look,
             dashes_left=p.dashes_left,
         )
+        draw_marks(screen, origin, entities)
         counter = counter_step(counter, ledger.balance, frame_dt)
         draw_balance(screen, ledger.balance, VIEW.w, counter)
+        if cleared:
+            line = "you made it"
+        elif listening and not prompt:
+            line = "listening"
+        elif asking or listening:
+            line = "> " + prompt + "_"
+        else:
+            line = notice
+        _bar(screen, line)
         if show_debug:
-            if font is None:
-                try:
-                    font = pygame.font.Font(None, 16)
-                except (NotImplementedError, pygame.error):
-                    font = False
-            if font:
-                lines = (
-                    f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
-                    f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
-                    f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
-                )
-                for i, line in enumerate(lines):
-                    screen.blit(font.render(line, True, (20, 20, 20)), (6, 6 + i * 14))
+            rows = (
+                f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
+                f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
+                f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
+            )
+            for i, row in enumerate(rows):
+                _ink(screen, row, 6, 6 + i * 10, scale=1)
         pygame.display.flip()
         if WEB:
             clock.tick(60)
         else:
             clock.tick(0 if _has_vsync(pygame) else 240)
         await asyncio.sleep(0)
+    if mic is not None and not mic.done():
+        mic.cancel()
     audio.stop()
     pygame.quit()
+
+
+_GLYPHS = {
+    "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
+    "C": ("01111", "10000", "10000", "10000", "10000", "10000", "01111"),
+    "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    "E": ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+    "F": ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    "G": ("01111", "10000", "10000", "10111", "10001", "10001", "01110"),
+    "H": ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "I": ("11111", "00100", "00100", "00100", "00100", "00100", "11111"),
+    "J": ("00111", "00010", "00010", "00010", "10010", "10010", "01100"),
+    "K": ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
+    "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    "M": ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
+    "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
+    "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    "Q": ("01110", "10001", "10001", "10001", "10101", "10010", "01101"),
+    "R": ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+    "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    "U": ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "V": ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
+    "W": ("10001", "10001", "10001", "10101", "10101", "10101", "01010"),
+    "X": ("10001", "10001", "01010", "00100", "01010", "10001", "10001"),
+    "Y": ("10001", "10001", "01010", "00100", "00100", "00100", "00100"),
+    "Z": ("11111", "00001", "00010", "00100", "01000", "10000", "11111"),
+    "0": ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
+    "1": ("00100", "01100", "00100", "00100", "00100", "00100", "01110"),
+    "2": ("01110", "10001", "00001", "00010", "00100", "01000", "11111"),
+    "3": ("11110", "00001", "00001", "01110", "00001", "00001", "11110"),
+    "4": ("10001", "10001", "10001", "11111", "00001", "00001", "00001"),
+    "5": ("11111", "10000", "10000", "11110", "00001", "10001", "01110"),
+    "6": ("01110", "10000", "10000", "11110", "10001", "10001", "01110"),
+    "7": ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
+    "8": ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
+    "9": ("01110", "10001", "10001", "01111", "00001", "00001", "01110"),
+    " ": ("00000", "00000", "00000", "00000", "00000", "00000", "00000"),
+    ">": ("10000", "01000", "00100", "00010", "00100", "01000", "10000"),
+    ".": ("00000", "00000", "00000", "00000", "00000", "01100", "01100"),
+    ",": ("00000", "00000", "00000", "00000", "00110", "00110", "01100"),
+    "-": ("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
+    "_": ("00000", "00000", "00000", "00000", "00000", "00000", "11111"),
+}
+
+
+def _ink(screen: object, message: str, x: int, y: int, scale: int) -> None:
+    import pygame
+
+    cursor = x
+    for character in message.upper():
+        glyph = _GLYPHS.get(character, _GLYPHS[" "])
+        for row, bits in enumerate(glyph):
+            for col, bit in enumerate(bits):
+                if bit == "1":
+                    pygame.draw.rect(
+                        screen,
+                        (28, 24, 22),
+                        (cursor + col * scale, y + row * scale, scale, scale),
+                    )
+        cursor += 6 * scale
+
+
+def _frame_png(screen: object) -> bytes:
+    """The pixels on screen right now, before the placing notice covers them."""
+    import struct
+    import zlib
+
+    import pygame
+
+    width, height = screen.get_size()
+    rgb = pygame.image.tobytes(screen, "RGB")
+    rows = b"".join(
+        b"\x00" + rgb[y * width * 3 : (y + 1) * width * 3] for y in range(height)
+    )
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(rows, 6))
+        + chunk(b"IEND", b"")
+    )
+
+
+def _bar(screen: object, line: str) -> None:
+    import pygame
+
+    pygame.draw.rect(screen, (236, 224, 196), (0, 332, 640, 28))
+    _ink(screen, line, 8, 338, scale=2)
 
 
 def _has_vsync(pygame: object) -> bool:
