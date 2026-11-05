@@ -246,10 +246,11 @@ async def run() -> None:
 
     def submit(text: str) -> None:
         nonlocal world, entities, edited, notice
+        frame = _frame_png(screen)
         notice = "placing the box"
         _bar(screen, notice)
         pygame.display.flip()
-        result = ask(text, render_map(world, entities, p.body.rect))
+        result = ask(text, render_map(world, entities, p.body.rect), frame)
         if isinstance(result, Placed):
             edit = place_box(world, entities, result.col, result.row)
             if isinstance(edit, EditSuccess):
@@ -501,6 +502,36 @@ def _ink(screen: object, message: str, x: int, y: int, scale: int) -> None:
                         (cursor + col * scale, y + row * scale, scale, scale),
                     )
         cursor += 6 * scale
+
+
+def _frame_png(screen: object) -> bytes:
+    """The pixels on screen right now, before the placing notice covers them."""
+    import struct
+    import zlib
+
+    import pygame
+
+    width, height = screen.get_size()
+    rgb = pygame.image.tobytes(screen, "RGB")
+    rows = b"".join(
+        b"\x00" + rgb[y * width * 3 : (y + 1) * width * 3] for y in range(height)
+    )
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(rows, 6))
+        + chunk(b"IEND", b"")
+    )
 
 
 def _bar(screen: object, line: str) -> None:

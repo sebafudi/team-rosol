@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -18,6 +19,7 @@ SYSTEM = (
     "B is the box if it is already placed. "
     "The floor gap is the dots on the bottom row, columns 4 through 11. "
     "Call place_box with row 7 and col 6, 7, or 8, so air remains on both sides of the box. "
+    "The image is the screen the player sees right now, before you place anything. "
     "Do not cover P or E. Call the tool once."
 )
 
@@ -50,8 +52,8 @@ def api_key() -> str | None:
     return None
 
 
-def ask(prompt: str, grid: str) -> Placed | AgentMiss:
-    """Send the player's sentence and the grid. Return the tool's tile, or why it missed."""
+def ask(prompt: str, grid: str, frame_png: bytes) -> Placed | AgentMiss:
+    """Send the player's sentence, the grid, and a PNG of the screen. Return the tool's tile."""
     key = api_key()
     if key is None:
         return AgentMiss("OPENROUTER_API_KEY is missing")
@@ -61,7 +63,19 @@ def ask(prompt: str, grid: str) -> Placed | AgentMiss:
         "reasoning": {"effort": "none"},
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": f"{grid}\n\nPlayer: {prompt}"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"{grid}\n\nPlayer: {prompt}"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,"
+                            + base64.b64encode(frame_png).decode()
+                        },
+                    },
+                ],
+            },
         ],
         "tools": [
             {
