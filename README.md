@@ -59,27 +59,4 @@ python -m tilebase
 
 `load_map` reads a character grid. `put_cell` returns a new grid with one cell replaced. `plan_move` chooses the body's delta each frame. `move_body` applies that delta and stops on tiles the caller marks as blocking. The demo slides a rectangle with the arrow keys on 32 by 32 tiles. It does not jump.
 
-## What we will demo (about one minute)
-
-1. Player stuck at a gap.
-2. Type a prompt. AI builds a bridge or raises a platform.
-3. Player crosses and reaches the exit.
-4. Line to leave in the room: *you play, the AI rewires the level*.
-
-## In scope / out of scope
-
-We are shipping a playable co-op loop, not a full game.
-
-| We build | We skip (for now) |
-| --- | --- |
-| pygame platforming | Online multiplayer netcode |
-| In-game prompt + map edits | Voice input |
-| A few authored levels | Infinite procedural worlds |
-| Safe, visible mutations | Combat systems |
-| Highlight + confirmation text | Generative art pipelines |
-
-The product brief with principles and constraints is in [`context.md`](context.md).
-
-## For the jury
-
-Work in this repo is committed in small, atomic steps during the event. `git log` is the build history: one concern per commit, pushed as we go, not rewritten.
+The window is fullscreen. The camera is framed at 320 by 180 and scaled in whole pixels so that view fills 720p, 1080p, 1440p, 4K, 16:10, and ultrawide displays. Escape closes it.
