@@ -1,6 +1,7 @@
 """Time a recorded voice command from the end of speech to a placed box.
 
     python -m scripts.bench_voice [wav] [runs]
+    BENCH_MODEL_ONLY=1 python -m scripts.bench_voice   # skip speech, time ask() alone
 
 The WAV (16 kHz mono int16) is streamed to Deepgram at real-time speed, the
 way the microphone would send it, then trailing silence keeps flowing until
@@ -105,6 +106,18 @@ async def _stt(frames: bytes, rate: int) -> dict:
     return out
 
 
+def _in_gap(result: object) -> bool:
+    """The box hangs over the floor gap (cols 4-11) with air on both sides."""
+    return isinstance(result, agent.Placed) and 5 <= result.col <= 9 and result.row in (6, 7)
+
+
+def run_model(text: str, png: bytes) -> dict:
+    asked = time.perf_counter()
+    result = agent.ask(text, png)
+    took = time.perf_counter() - asked
+    return {"text": text, "result": repr(result), "ok": _in_gap(result), "model": took, "total_after_speech": took}
+
+
 def run_once(frames: bytes, rate: int, png: bytes) -> dict:
     heard = asyncio.run(_stt(frames, rate))
     asked = time.perf_counter()
@@ -113,6 +126,7 @@ def run_once(frames: bytes, rate: int, png: bytes) -> dict:
     return {
         "text": heard["text"],
         "result": repr(result),
+        "ok": _in_gap(result),
         "connect": heard["connect"],
         "stt_after_speech": heard["final_at"] - heard["speech_end_at"],
         "model": placed - asked,
@@ -127,13 +141,19 @@ def main() -> None:
         rate = w.getframerate()
         frames = w.readframes(w.getnframes())
     png = _level_png()
-    print(f"model={agent.MODEL} png={len(png)} bytes clip={clip.name}", flush=True)
+    chosen = agent.provider()
+    model_only = bool(os.environ.get("BENCH_MODEL_ONLY"))
+    agent.warm()
+    print(f"provider={chosen.host} model={chosen.model} png={len(png)} bytes clip={clip.name}", flush=True)
     rows = []
     for n in range(runs):
-        row = run_once(frames, rate, png)
+        row = run_model("Place the box between the two gaps.", png) if model_only else run_once(frames, rate, png)
         rows.append(row)
         print(json.dumps({"run": n, **{k: round(v, 3) if isinstance(v, float) else v for k, v in row.items()}}), flush=True)
+    print(f"{'correct':>20}: {sum(r['ok'] for r in rows)}/{len(rows)}")
     for name in ("connect", "stt_after_speech", "model", "total_after_speech"):
+        if name not in rows[0]:
+            continue
         values = [r[name] for r in rows]
         print(f"{name:>20}: median {statistics.median(values):.3f}s  min {min(values):.3f}s  max {max(values):.3f}s")
 
