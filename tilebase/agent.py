@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-MODEL = "google/gemini-3.1-flash-lite"
+MODEL = "google/gemini-3.5-flash-lite"
 
 SYSTEM = (
     "You place one box on the level in the image. "
@@ -17,11 +17,9 @@ SYSTEM = (
     "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
     "You have one tool, place_box. col and row are the top-left tile. "
     "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
-    "The floor gap is columns 4 through 11 on the bottom row. "
-    "Call place_box with row 7 and col 6, 7, or 8, so air remains on both sides of the box. "
     "Stone tiles are solid. The orange square is the box if it is already placed. "
     "The green tile is the exit. The character is the player. "
-    "Do not cover the player or the exit. Call the tool once."
+    "Do what the player asks. Do not cover the player or the exit. Call the tool once."
 )
 
 
@@ -61,6 +59,7 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
+        "reasoning": {"effort": "medium"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
