@@ -464,7 +464,7 @@ async def run() -> None:
             place_job = None
             notice = "model timed out"
         held = read_held(pygame, pygame.key.get_pressed(), pad)
-        if asking or place_job is not None:
+        if asking:
             held = Held(False, False, False, False, False, False)
             latch = Latch()
         ix = axis(held.left, held.right)
