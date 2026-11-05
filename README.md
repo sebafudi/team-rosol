@@ -28,6 +28,8 @@ The YARD level, recorded from the desktop build with live Grok calls. Each line 
 
 [`chris_demo.mp4`](chris_demo.mp4)
 
+[`desktop_demo.mp4`](docs/demo/desktop_demo.mp4)
+
 ## How a level plays
 
 1. You explore and hit a **soft lock**: a gap you can't jump, a gate you can't open, a missing path.
