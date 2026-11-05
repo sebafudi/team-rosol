@@ -4,6 +4,7 @@ from tilebase.move import Body, Frame
 from tilebase.tiles import Cell, World, define, load_map
 
 TILE = 32
+# World pixels the camera frames. The window matches the display.
 SCREEN = Size(320, 180)
 
 ROWS = (

@@ -8,7 +8,7 @@ import pygame
 
 from tilebase.demo import blocks, draw_body, plan_move, world
 from tilebase.geom import Rect, Size, Vec2
-from tilebase.loop import read_keys, run
+from tilebase.loop import BACKDROP, open_fullscreen, present, read_keys, run, wants_quit
 from tilebase.move import Body, Frame, Keys
 from tilebase.tiles import cell_at
 
@@ -41,6 +41,32 @@ class LoopTest(unittest.TestCase):
         corner = cell_at(level, Vec2(0, 0))
         assert corner is not None
         self.assertEqual(corner.rect, Rect(0, 0, 32, 32))
+
+    def test_escape_and_close_request_quit(self) -> None:
+        self.assertTrue(wants_quit(pygame.event.Event(pygame.QUIT)))
+        self.assertTrue(wants_quit(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)))
+        self.assertFalse(wants_quit(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a)))
+
+    def test_fullscreen_camera_covers_the_display(self) -> None:
+        screen, canvas, fitted = open_fullscreen(Size(320, 180))
+        canvas.fill((255, 0, 0))
+        present(screen, canvas, fitted)
+        covered_w = fitted.camera.w * fitted.scale
+        covered_h = fitted.camera.h * fitted.scale
+        self.assertTrue(screen.get_flags() & pygame.FULLSCREEN)
+        self.assertEqual(canvas.get_size(), (fitted.camera.w, fitted.camera.h))
+        self.assertEqual(screen.get_at((fitted.x, fitted.y))[:3], (255, 0, 0))
+        self.assertEqual(
+            screen.get_at((fitted.x + covered_w - 1, fitted.y + covered_h - 1))[:3],
+            (255, 0, 0),
+        )
+        self.assertLess(screen.get_width() - covered_w, fitted.scale)
+        self.assertLess(screen.get_height() - covered_h, fitted.scale)
+        if fitted.x + covered_w < screen.get_width():
+            self.assertEqual(screen.get_at((screen.get_width() - 1, fitted.y))[:3], BACKDROP)
+        if fitted.y + covered_h < screen.get_height():
+            self.assertEqual(screen.get_at((fitted.x, screen.get_height() - 1))[:3], BACKDROP)
+        pygame.quit()
 
     def test_run_draws_two_dummy_frames(self) -> None:
         body = run(
