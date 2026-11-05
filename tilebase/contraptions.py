@@ -45,6 +45,7 @@ CATALOG = (
     Contraption("crate", "2 wide, 2 tall solid crate", _fill("block", 2, 2)),
     Contraption("plank", "3 wide, 1 tall solid wooden bridge", _fill("bridge", 3, 1)),
     Contraption("step", "3 wide, 1 tall gold platform you can jump up through", _fill("platform", 3, 1)),
+    Contraption("lift", "4 wide, 1 tall solid crossing", _fill("bridge", 4, 1)),
     Contraption("spring", "1 tile red spring that bounces you high", _fill("spring", 1, 1)),
 )
 _BY_ID = {c.id: c for c in CATALOG}

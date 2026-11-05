@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import math
 
-from tilebase.edit import Command, EditSuccess, Entities, apply_edit, define_entities, find_entity
+from tilebase.contraptions import Stock, place, stock_line
+from tilebase.edit import Entities, define_entities
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import hurt_at, level_tiles, overlaps_mark
 from tilebase.play import (
@@ -65,9 +66,8 @@ ROWS = (
     "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
 )
 
-# The two platforms the agent is holding. Each covers four tiles.
-SLOTS = ("left", "right")
-SPAN = 4
+# Two crossings, spent when the agent places them.
+POCKET: Stock = ("lift", "lift")
 
 
 def world() -> World:
@@ -102,34 +102,6 @@ def open_room() -> tuple[World, Entities, Vec2]:
     return level, entities, start
 
 
-def platform_tiles(col: int, row: int) -> tuple[tuple[int, int], ...]:
-    return tuple((col + dx, row) for dx in range(SPAN))
-
-
-def place_platform(world: World, entities: Entities, slot: str, col: int, row: int):
-    """Put one pocket platform. Placing the same slot again moves it."""
-    if slot not in SLOTS:
-        from tilebase.edit import InvalidOperation
-
-        return InvalidOperation(f"unknown platform {slot}")
-    tiles = platform_tiles(col, row)
-    current = find_entity(entities, slot)
-    if current is None:
-        return apply_edit(world, entities, Command(op="place", id=slot, tiles=tiles))
-    origin_col = min(c for c, _r in current.tiles)
-    origin_row = min(r for _c, r in current.tiles)
-    return apply_edit(
-        world,
-        entities,
-        Command(op="move", id=slot, by=(col - origin_col, row - origin_row)),
-    )
-
-
-def pocket_slots(entities: Entities) -> tuple[str, ...]:
-    """Platforms the agent is still holding."""
-    return tuple(slot for slot in SLOTS if find_entity(entities, slot) is None)
-
-
 def spawn_point(rows: tuple[str, ...] = ROWS) -> Vec2:
     for r, row in enumerate(rows):
         c = row.find("S")
@@ -156,52 +128,27 @@ def _snow_cap(screen: object, origin: Vec2) -> None:
     pygame.draw.circle(screen, (186, 224, 255), (round(27 * TILE + 8 - origin.x), round(28 - origin.y)), 16)
 
 
-def draw_platforms(screen: object, entities: Entities, origin: Vec2) -> None:
-    """Grey bars for platforms that have left the pocket."""
+def draw_pocket(screen: object, stock: Stock) -> None:
+    """How many lifts the agent is still holding."""
     import pygame
 
-    for slot in SLOTS:
-        entity = find_entity(entities, slot)
-        if entity is None:
-            continue
-        for col, row in entity.tiles:
-            x = round(col * TILE - origin.x)
-            y = round(row * TILE - origin.y)
-            pygame.draw.rect(screen, (72, 80, 92), (x, y, TILE, TILE))
-            pygame.draw.rect(screen, (176, 186, 198), (x + 4, y + 6, TILE - 8, TILE - 12))
-            pygame.draw.circle(screen, (90, 98, 110), (x + TILE // 2, y + TILE // 2), 6, 2)
-
-
-def draw_pocket(screen: object, entities: Entities) -> None:
-    """The platforms the agent is still holding, along the bottom left."""
-    import pygame
-
-    holding = pocket_slots(entities)
-    for index, slot in enumerate(SLOTS):
-        x = 12 + index * 150
-        y = VIEW.h - 46
-        held = slot in holding
-        pygame.draw.rect(screen, (16, 20, 32), (x, y, 136, 28))
-        color = (176, 186, 198) if held else (60, 66, 76)
-        pygame.draw.rect(screen, color, (x + 8, y + 8, 72, 12))
-        pygame.draw.circle(screen, (40, 28, 24), (x + 44, y + 14), 3)
-        try:
-            font = pygame.font.Font(None, 18)
-        except (NotImplementedError, pygame.error):
-            font = None
-        if font is not None:
-            label = slot if held else "placed"
-            text = font.render(label, True, (230, 236, 244))
-            screen.blit(text, (x + 86, y + 7))
+    label = stock_line(stock) or "pocket empty"
+    pygame.draw.rect(screen, (16, 20, 32), (8, VIEW.h - 48, 220, 22))
+    try:
+        font = pygame.font.Font(None, 20)
+    except (NotImplementedError, pygame.error):
+        font = None
+    if font is not None:
+        screen.blit(font.render(label, True, (230, 236, 244)), (14, VIEW.h - 44))
 
 
 def draw_scene(
     screen: object,
     level: World,
-    entities: Entities,
     origin: Vec2,
     cleared: bool,
     line: str,
+    stock: Stock,
 ) -> None:
     import pygame
 
@@ -211,8 +158,7 @@ def draw_scene(
         cell.draw(screen, Rect(rect.x - origin.x, rect.y - origin.y, rect.w, rect.h))
     _sign(screen, origin)
     _snow_cap(screen, origin)
-    draw_platforms(screen, entities, origin)
-    draw_pocket(screen, entities)
+    draw_pocket(screen, stock)
     bar = pygame.Rect(0, VIEW.h - 22, VIEW.w, 22)
     pygame.draw.rect(screen, (236, 224, 196), bar)
     try:
@@ -264,7 +210,9 @@ async def run_level(screen, audio=None) -> None:
     import pygame
 
     from tilebase import art, blob, player
-    from tilebase.agent import AgentMiss, PlacedPlatform, ask_platforms
+    from tilebase.agent import AgentMiss, Placed, ask, level_grid
+    from tilebase.contraptions import Refused
+    from tilebase.tiles import glyph_rows
 
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
     level, entities, start = open_room()
@@ -279,6 +227,7 @@ async def run_level(screen, audio=None) -> None:
         return room, held, spawn, player.spawn(spawn.x, spawn.y), False, False, Ground()
 
     level, entities, start, p, cleared, edited, ground = reset()
+    stock = POCKET
     prev_rect = p.body.rect
     look = blob.rest()
     puffs = blob.no_puffs()
@@ -299,21 +248,32 @@ async def run_level(screen, audio=None) -> None:
         nonlocal notice, place_job
         if place_job is not None:
             return
+        center = Vec2(
+            p.body.rect.x + p.body.rect.w / 2,
+            p.body.rect.y + p.body.rect.h / 2,
+        )
+        grid = level_grid(
+            glyph_rows(level), (int(center.x // TILE), int(center.y // TILE))
+        )
         frame = _frame_png(canvas)
-        notice = "placing a platform"
-        place_job = asyncio.create_task(asyncio.to_thread(ask_platforms, text, frame))
+        notice = "placing a lift"
+        place_job = asyncio.create_task(
+            asyncio.to_thread(ask, text, frame, stock, grid)
+        )
 
     def finish_place(result: object) -> None:
-        nonlocal level, entities, edited, notice
-        if isinstance(result, PlacedPlatform):
-            edit = place_platform(level, entities, result.slot, result.col, result.row)
-            if isinstance(edit, EditSuccess):
-                level = edit.world
-                entities = edit.entities
-                edited = True
-                notice = f"{result.slot} at {result.col},{result.row}"
+        nonlocal level, stock, edited, notice
+        if isinstance(result, Placed):
+            placed = place(
+                level, entities, stock, result.name, result.col, result.row, p.body.rect
+            )
+            if isinstance(placed, Refused):
+                notice = placed.reason
             else:
-                notice = type(edit).__name__
+                level = placed.world
+                stock = placed.stock
+                edited = True
+                notice = f"{result.name} at {result.col},{result.row}"
         elif isinstance(result, AgentMiss):
             notice = result.message
 
@@ -343,6 +303,7 @@ async def run_level(screen, audio=None) -> None:
                     prompt = ""
                 elif event.key == pygame.K_r:
                     level, entities, start, p, cleared, edited, ground = reset()
+                    stock = POCKET
                     prev_rect = p.body.rect
                 if event.key in jump_codes:
                     latch = Latch(jump=True, dash=latch.dash)
@@ -432,7 +393,7 @@ async def run_level(screen, audio=None) -> None:
         else:
             line = notice
         art.draw_backdrop(canvas, cam, Size(level.cols * TILE, level.rows * TILE), VIEW)
-        draw_scene(canvas, level, entities, origin, cleared, line)
+        draw_scene(canvas, level, origin, cleared, line, stock)
         blob.draw_puffs(canvas, puffs, origin)
         art.draw_player(
             canvas,
