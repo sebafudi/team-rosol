@@ -60,7 +60,7 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
-        "reasoning": {"effort": "minimal"},
+        "reasoning": {"effort": "low"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
