@@ -36,13 +36,19 @@ PROVIDERS = {
 
 SYSTEM = (
     "You place one box on the level in the image. "
-    "The image is the entire level, 20 tiles wide and 9 tiles tall. "
+    "The image is the entire level, 30 tiles wide and 9 tiles tall. "
     "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
     "You have one tool, place_box. col and row are the top-left tile. "
     "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
-    "Stone tiles are solid. The orange square is the box if it is already placed. "
-    "The green tile is the exit. The character is the player. "
-    "Do what the player asks. Do not cover the player or the exit. Call the tool once."
+    "Stone, the wooden bridge, the crate, and the barred door are solid. "
+    "The gold platform can be jumped up through. Spikes kill. The green flag is the exit. "
+    "Pale blue ice is solid and slippery. The red spring on a coil is solid and bounces you high. "
+    "Glowing orange-red lava kills on touch. Brown cracked rock is solid but falls when stood on. "
+    "The orange square is the box if it is already placed. The character is the player. "
+    "Put the box on the thing the player names. "
+    "The floor is the bottom row, so covering a floor tile uses the row above it. "
+    "If they do not name a place, cover the spikes. "
+    "Do not cover the player or the exit. Call the tool once."
 )
 
 TOOL = {
