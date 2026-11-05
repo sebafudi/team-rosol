@@ -37,7 +37,7 @@ class Tuning:
     jump_speed: float = 420.0
     jump_h_boost: float = 160.0
     var_jump_time: float = 0.18
-    jump_cut: float = 0.5
+    jump_cut: float = 1.0
     coyote_time: float = 0.1
     jump_buffer_time: float = 0.1
     wall_slide_max: float = 80.0
