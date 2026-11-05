@@ -17,6 +17,9 @@ from tilebase.edit import (
     Entity,
     apply_edit,
     define_entities,
+    entities_by_type,
+    entity_bounds,
+    validate_command,
 )
 
 
@@ -93,8 +96,20 @@ def demo() -> None:
     print_world_section(world, 3, 5)
     print()
 
-    print("2. Apply command: move plat_left up by 2 tiles\n")
+    print("Query: All platforms")
+    platforms = entities_by_type(entities, "platform")
+    for p in platforms:
+        bounds = entity_bounds(p, TILE)
+        print(f"   {p.id}: {len(p.tiles)} tiles at {bounds}")
+    print()
+
+    print("2. Apply command: move plat_left up by 2 tiles")
     cmd = Command(op="move", id="plat_left", by=(0, -2))
+    error = validate_command(entities, cmd)
+    if error:
+        print(f"   Validation failed: {error}\n")
+        return
+    print("   ✓ Command validated\n")
     result = apply_edit(world, entities, cmd)
 
     if isinstance(result, EditSuccess):

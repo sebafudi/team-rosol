@@ -131,6 +131,21 @@ def apply_edit(world: World, entities: Entities, cmd: Command) -> EditResult:
     return UnknownOp(cmd.op)
 
 
+def apply_edits(
+    world: World, entities: Entities, commands: tuple[Command, ...]
+) -> EditResult:
+    """Apply multiple commands in sequence. Stops at first error."""
+    all_changed: set[tuple[int, int]] = set()
+    for cmd in commands:
+        result = apply_edit(world, entities, cmd)
+        if not isinstance(result, EditSuccess):
+            return result
+        world = result.world
+        entities = result.entities
+        all_changed.update(result.changed_tiles)
+    return EditSuccess(world, entities, frozenset(all_changed))
+
+
 def _apply_move(world: World, entities: Entities, cmd: Command) -> EditResult:
     entity = _find_entity(entities, cmd.id)
     if entity is None:
@@ -331,3 +346,54 @@ def _rects_overlap(a: Rect, b: Rect) -> bool:
     return not (
         a.x + a.w <= b.x or b.x + b.w <= a.x or a.y + a.h <= b.y or b.y + b.h <= a.y
     )
+
+
+def find_entity(entities: Entities, entity_id: str) -> Entity | None:
+    """Find an entity by id. Returns None if not found."""
+    return _find_entity(entities, entity_id)
+
+
+def entities_by_type(entities: Entities, entity_type: str) -> tuple[Entity, ...]:
+    """Return all entities of a given type."""
+    return tuple(e for e in entities.items if e.type == entity_type)
+
+
+def entity_at_tile(entities: Entities, col: int, row: int) -> tuple[Entity, ...]:
+    """Return all entities occupying a given tile position."""
+    return tuple(e for e in entities.items if (col, row) in e.tiles)
+
+
+def entity_bounds(entity: Entity, tile_size: int) -> Rect:
+    """Calculate the bounding rectangle of an entity in world coordinates."""
+    if not entity.tiles:
+        return Rect(0, 0, 0, 0)
+    cols, rows = zip(*entity.tiles)
+    min_col, max_col = min(cols), max(cols)
+    min_row, max_row = min(rows), max(rows)
+    return Rect(
+        min_col * tile_size,
+        min_row * tile_size,
+        (max_col - min_col + 1) * tile_size,
+        (max_row - min_row + 1) * tile_size,
+    )
+
+
+def validate_command(entities: Entities, cmd: Command) -> str | None:
+    """Pre-validate a command without applying it. Returns error message or None."""
+    if cmd.op not in ("move", "place", "remove", "toggle"):
+        return f"Unknown operation: {cmd.op}"
+
+    if cmd.op in ("move", "remove", "toggle"):
+        entity = _find_entity(entities, cmd.id)
+        if entity is None:
+            return f"Entity not found: {cmd.id}"
+        if cmd.op == "toggle" and entity.type not in ("door", "gate"):
+            return f"Cannot toggle {entity.type}"
+
+    if cmd.op == "place":
+        if _find_entity(entities, cmd.id) is not None:
+            return f"Entity already exists: {cmd.id}"
+        if not cmd.tiles:
+            return "Place command requires tiles"
+
+    return None

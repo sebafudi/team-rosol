@@ -103,6 +103,54 @@ All edits are validated before application:
 - `PlayerBuried(tiles)`: Would overlap player spawn area
 - `InvalidOperation(reason)`: Other validation failure
 
+## Query Helpers
+
+```python
+# Find entity by id
+entity = find_entity(entities, "plat1")
+
+# Get all entities of a type
+platforms = entities_by_type(entities, "platform")
+
+# Find entities at a tile position
+at_tile = entity_at_tile(entities, col=5, row=8)
+
+# Get entity bounding box in world coordinates
+bounds = entity_bounds(entity, tile_size=32)
+```
+
+## Validation
+
+Pre-validate commands before applying:
+
+```python
+error = validate_command(entities, cmd)
+if error:
+    print(f"Invalid: {error}")
+else:
+    result = apply_edit(world, entities, cmd)
+```
+
+## Batch Edits
+
+Apply multiple commands in sequence:
+
+```python
+from tilebase.edit import apply_edits
+
+result = apply_edits(
+    world,
+    entities,
+    (
+        Command(op="move", id="plat1", by=(0, -2)),
+        Command(op="toggle", id="door1"),
+        Command(op="move", id="plat2", by=(3, 0)),
+    )
+)
+```
+
+Stops at the first error and returns it. On success, returns all changed tiles.
+
 ## Demo
 
 Run the included demo to see a complete example:
