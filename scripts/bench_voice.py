@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 import websockets  # noqa: E402
 
 from tilebase import agent, speech  # noqa: E402
+from tilebase.play import _same_words  # noqa: E402
 
 CHUNK_SECONDS = 0.1
 SILENCE_LIMIT = 4.0
@@ -63,8 +64,8 @@ def _level_png() -> bytes:
     return _frame_png(sheet)
 
 
-async def _stt(frames: bytes, rate: int) -> dict:
-    """Stream the clip in real time. Return the transcript and phase times."""
+async def _stt(frames: bytes, rate: int, png: bytes) -> dict:
+    """Stream the clip in real time, guessing on interims like the game does."""
     key = speech.api_key()
     began = time.perf_counter()
     socket = await websockets.connect(
@@ -88,6 +89,8 @@ async def _stt(frames: bytes, rate: int) -> dict:
             sent += CHUNK_SECONDS
             await asyncio.sleep(max(0.0, start + sent - time.perf_counter()))
 
+    guess = None
+    guess_text = ""
     async with socket:
         stream_start = time.perf_counter()
         sender = asyncio.create_task(send())
@@ -95,10 +98,18 @@ async def _stt(frames: bytes, rate: int) -> dict:
             async for event in speech._read_transcripts(socket):
                 if isinstance(event, speech.ListenError):
                     raise RuntimeError(event.message)
-                if event.final:
-                    out["text"] = event.text
-                    out["final_at"] = time.perf_counter()
-                    break
+                if not event.final:
+                    if len(event.text.split()) >= 3 and not _same_words(event.text, guess_text):
+                        guess_text = event.text
+                        guess = asyncio.create_task(asyncio.to_thread(agent.ask, guess_text, png))
+                    continue
+                out["text"] = event.text
+                out["final_at"] = time.perf_counter()
+                out["guess_hit"] = guess is not None and _same_words(event.text, guess_text)
+                job = guess if out["guess_hit"] else asyncio.to_thread(agent.ask, event.text, png)
+                out["result"] = await job
+                out["placed_at"] = time.perf_counter()
+                break
         finally:
             sender.cancel()
             await asyncio.gather(sender, return_exceptions=True)
@@ -119,18 +130,16 @@ def run_model(text: str, png: bytes) -> dict:
 
 
 def run_once(frames: bytes, rate: int, png: bytes) -> dict:
-    heard = asyncio.run(_stt(frames, rate))
-    asked = time.perf_counter()
-    result = agent.ask(heard["text"], png)
-    placed = time.perf_counter()
+    heard = asyncio.run(_stt(frames, rate, png))
     return {
         "text": heard["text"],
-        "result": repr(result),
-        "ok": _in_gap(result),
+        "result": repr(heard["result"]),
+        "ok": _in_gap(heard["result"]),
+        "guess_hit": heard["guess_hit"],
         "connect": heard["connect"],
         "stt_after_speech": heard["final_at"] - heard["speech_end_at"],
-        "model": placed - asked,
-        "total_after_speech": heard["final_at"] - heard["speech_end_at"] + placed - asked,
+        "model_after_final": heard["placed_at"] - heard["final_at"],
+        "total_after_speech": heard["placed_at"] - heard["speech_end_at"],
     }
 
 
@@ -151,7 +160,7 @@ def main() -> None:
         rows.append(row)
         print(json.dumps({"run": n, **{k: round(v, 3) if isinstance(v, float) else v for k, v in row.items()}}), flush=True)
     print(f"{'correct':>20}: {sum(r['ok'] for r in rows)}/{len(rows)}")
-    for name in ("connect", "stt_after_speech", "model", "total_after_speech"):
+    for name in ("connect", "stt_after_speech", "model", "model_after_final", "total_after_speech"):
         if name not in rows[0]:
             continue
         values = [r[name] for r in rows]
