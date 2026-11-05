@@ -1,4 +1,4 @@
-"""One 64 by 64 box. The model may place it, and nothing else.
+"""The opening level: its tiles, exit, spawn, and the contraptions it hands the agent.
 
 The other tiles are landmarks with their own behavior, so a prompt can say
 where: the spikes, the bridge, the door, the platform, the crate, the flag.
@@ -8,24 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tilebase.edit import (
-    Command,
-    EditResult,
-    Entities,
-    define_entities,
-    apply_edit,
-    find_entity,
-)
+from tilebase.contraptions import STARTING_STOCK, Stock
+from tilebase.edit import Entities, define_entities
 from tilebase.edit_integration import tile_rects
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import level_tiles
 from tilebase.tiles import World, cells_overlapping, load_map
 
 TILE = 32
-SPAN = 2
-BOX_ID = "box"
 
-# The pit is wider than a dash-jump. Spikes mark where the box belongs.
+# The pit is wider than a dash-jump. Spikes mark where a contraption belongs.
 # The shelf on the left stays over stone, short of the lip. The start floor is
 # ice, a spring sits at the lip, lava fills the pit's left half, and cracked
 # rock hangs over it: each kind is something a prompt can name.
@@ -48,13 +40,7 @@ class Level:
     world: World
     entities: Entities
     spawn: Vec2
-
-
-def box_tiles(col: int, row: int) -> tuple[tuple[int, int], ...]:
-    """Top-left tile plus the other three. 2 by 2 tiles is 64 by 64 pixels."""
-    return tuple(
-        (col + dx, row + dy) for dy in range(SPAN) for dx in range(SPAN)
-    )
+    stock: Stock
 
 
 def open_level() -> Level:
@@ -72,35 +58,17 @@ def open_level() -> Level:
         exit_tiles=EXIT,
         spawn_rect=Rect(spawn.x, spawn.y, 22, 22),
     )
-    return Level(loaded, entities, spawn)
-
-
-def place_box(world: World, entities: Entities, col: int, row: int) -> EditResult:
-    """Put the one box so its top-left tile is `(col, row)`. A second call moves it."""
-    tiles = box_tiles(col, row)
-    current = find_entity(entities, BOX_ID)
-    if current is None:
-        return apply_edit(
-            world, entities, Command(op="place", id=BOX_ID, tiles=tiles)
-        )
-    origin_col = min(c for c, _r in current.tiles)
-    origin_row = min(r for _c, r in current.tiles)
-    return apply_edit(
-        world,
-        entities,
-        Command(op="move", id=BOX_ID, by=(col - origin_col, row - origin_row)),
-    )
+    return Level(loaded, entities, spawn, STARTING_STOCK)
 
 
 def level_surface(
     world: World,
-    entities: Entities,
     center: Vec2,
     player: object,
     look: object,
     dashes_left: int,
 ) -> object:
-    """The whole level, one pixel per game pixel, with the player, box, and exit."""
+    """The whole level, one pixel per game pixel, with the player and exit."""
     import pygame
 
     from tilebase import art
@@ -114,7 +82,6 @@ def level_surface(
         rect = cell.rect
         cell.draw(surface, Rect(rect.x, rect.y, rect.w, rect.h))
     art.draw_player(surface, center, player, look, dashes_left=dashes_left)
-    draw_marks(surface, Vec2(0, 0), entities)
     return surface
 
 
@@ -128,18 +95,3 @@ def overlaps_exit(body: Rect, entities: Entities) -> bool:
         ):
             return True
     return False
-
-
-def draw_marks(screen: object, origin: Vec2, entities: Entities) -> None:
-    """Paint the placed box. The flag and the other kinds are real tiles."""
-    import pygame
-
-    box = find_entity(entities, BOX_ID)
-    if box is None:
-        return
-    for rect in tile_rects(frozenset(box.tiles), TILE):
-        pygame.draw.rect(
-            screen,
-            (196, 112, 48),
-            (int(rect.x - origin.x), int(rect.y - origin.y), TILE, TILE),
-        )

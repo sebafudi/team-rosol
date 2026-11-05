@@ -255,12 +255,13 @@ async def run() -> None:
         return
     from tilebase.agent import AgentMiss, Placed, ask, warm
     from tilebase.speech import ListenError, Transcript
-    from tilebase.box import draw_marks, level_surface, open_level, overlaps_exit, place_box
-    from tilebase.edit import EditSuccess
+    from tilebase.box import level_surface, open_level, overlaps_exit
+    from tilebase.contraptions import Placement, place, stock_line
 
     level = open_level()
     world = level.world
     entities = level.entities
+    stock = level.stock
     start = level.spawn
     prompt = ""
     asking = False
@@ -312,10 +313,10 @@ async def run() -> None:
             p.body.rect.x + p.body.rect.w / 2,
             p.body.rect.y + p.body.rect.h / 2,
         )
-        sheet = level_surface(
-            world, entities, center, p, look, p.dashes_left
+        sheet = level_surface(world, center, p, look, p.dashes_left)
+        return asyncio.create_task(
+            asyncio.to_thread(ask, text, _frame_png(sheet), stock)
         )
-        return asyncio.create_task(asyncio.to_thread(ask, text, _frame_png(sheet)))
 
     def guess(text: str) -> None:
         nonlocal guess_job, guess_text
@@ -330,7 +331,7 @@ async def run() -> None:
         nonlocal notice, place_job, guess_job, guess_text
         if place_job is not None:
             return
-        notice = "placing the box"
+        notice = "placing"
         if guess_job is not None and _same_words(text, guess_text):
             place_job = guess_job
         else:
@@ -339,16 +340,18 @@ async def run() -> None:
         guess_text = ""
 
     def finish_place(result: object) -> None:
-        nonlocal world, entities, edited, notice
+        nonlocal world, stock, edited, notice
         if isinstance(result, Placed):
-            edit = place_box(world, entities, result.col, result.row)
-            if isinstance(edit, EditSuccess):
-                world = edit.world
-                entities = edit.entities
+            placed = place(
+                world, entities, stock, result.name, result.col, result.row, p.body.rect
+            )
+            if isinstance(placed, Placement):
+                world = placed.world
+                stock = placed.stock
                 edited = True
-                notice = f"box at {result.col},{result.row}"
+                notice = f"{result.name} at {result.col},{result.row}"
             else:
-                notice = type(edit).__name__
+                notice = placed.reason
         elif isinstance(result, AgentMiss):
             notice = result.message
 
@@ -512,7 +515,6 @@ async def run() -> None:
             look,
             dashes_left=p.dashes_left,
         )
-        draw_marks(screen, origin, entities)
         counter = counter_step(counter, ledger.balance, frame_dt)
         draw_balance(screen, ledger.balance, VIEW.w, counter)
         if cleared:
@@ -523,7 +525,7 @@ async def run() -> None:
             line = "> " + prompt + "_"
         else:
             line = notice
-        _bar(screen, line)
+        _bar(screen, line, stock_line(stock))
         if show_debug:
             rows = (
                 f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
@@ -646,11 +648,13 @@ def _frame_png(screen: object) -> bytes:
     )
 
 
-def _bar(screen: object, line: str) -> None:
+def _bar(screen: object, line: str, stock: str) -> None:
     import pygame
 
     pygame.draw.rect(screen, (236, 224, 196), (0, 332, 640, 28))
     _ink(screen, line, 8, 338, scale=2)
+    if stock:
+        _ink(screen, stock, 640 - 8 - 6 * len(stock), 342, scale=1)
 
 
 def _has_vsync(pygame: object) -> bool:
