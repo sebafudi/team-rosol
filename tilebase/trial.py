@@ -5,8 +5,8 @@ released, or Enter is pressed on a typed one). A prompt the agent fails to
 place hands the token back. The next token waits just past each obstacle, so
 each prompt has to count:
 
-1. The cliff is twelve tiles of sheer stone. A jump, dash and wall-jump fall
-   short. Something at its foot to stand on gets you up.
+1. The cliff is nine tiles of sheer stone, out of reach of a jump and dash.
+   A spring at its foot throws you high enough to dash onto the top.
 2. The lava lake is sixteen tiles wide, wider than any dash-jump. One stepping
    stone in the middle splits it into two jumps.
 3. The spike tunnel has a low roof, so you cannot arc over it. A dash carries
@@ -27,10 +27,10 @@ from tilebase.tokens import TOKEN_MARK, draw_token
 
 ROWS = (
     "##########################################################################",
+    "#.............................#......................################....#",
+    "#.............................#......................################....#",
+    "#.............................#......................################....#",
     "#........................o....#......................################....#",
-    "#...................########..#......................################....#",
-    "#...................########..#......................################....#",
-    "#...................########..#......................################....#",
     "#...................########..#......................################....#",
     "#...................########..#......................################....#",
     "#...................########..#......................################....#",
@@ -61,7 +61,7 @@ def _zone(col0: int, col1: int, row0: int, row1: int) -> Rect:
 
 # On top of the cliff, at the foot of the drop past it, and past the lava.
 CHECKPOINTS = (
-    (_zone(20, 27, 1, 1), _stand(22, 1)),
+    (_zone(20, 27, 4, 4), _stand(22, 4)),
     (_zone(28, 30, 12, 13), _stand(29, 13)),
     (_zone(47, 52, 12, 13), _stand(48, 13)),
 )
