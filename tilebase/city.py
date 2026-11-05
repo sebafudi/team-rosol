@@ -192,7 +192,6 @@ async def run_level(screen, audio=None) -> None:
 
     from tilebase import art, blob, player
     from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
-    from tilebase.speech import ListenError, Transcript
     from tilebase.tiles import glyph_rows
 
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
@@ -233,8 +232,11 @@ async def run_level(screen, audio=None) -> None:
     last = pygame.time.get_ticks() / 1000.0
 
     async def _hear() -> None:
-        from tilebase.speech import listen
-
+        try:
+            from tilebase.speech import ListenError, Transcript, listen
+        except ModuleNotFoundError:
+            heard.put_nowait("voice needs sounddevice")
+            return
         async for event in listen():
             heard.put_nowait(event)
             if isinstance(event, ListenError):
@@ -348,6 +350,13 @@ async def run_level(screen, audio=None) -> None:
 
         while not heard.empty():
             heard_event = heard.get_nowait()
+            if isinstance(heard_event, str):
+                listening = False
+                asking = False
+                notice = heard_event
+                continue
+            from tilebase.speech import ListenError, Transcript
+
             if isinstance(heard_event, ListenError):
                 listening = False
                 asking = False
