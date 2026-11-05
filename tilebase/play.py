@@ -256,6 +256,7 @@ async def run() -> None:
     from tilebase.agent import AgentMiss, Placed, ask, warm
     from tilebase.speech import ListenError, Transcript
     from tilebase.box import level_surface, open_level, overlaps_exit
+    from tilebase.kinds import grid_text
     from tilebase.contraptions import Placement, place, stock_line
 
     level = open_level()
@@ -314,8 +315,9 @@ async def run() -> None:
             p.body.rect.y + p.body.rect.h / 2,
         )
         sheet = level_surface(world, center, p, look, p.dashes_left)
+        grid = grid_text(world, p.body.rect)
         return asyncio.create_task(
-            asyncio.to_thread(ask, text, _frame_png(sheet), stock)
+            asyncio.to_thread(ask, text, _frame_png(sheet), grid, stock)
         )
 
     def guess(text: str) -> None:

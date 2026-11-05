@@ -37,23 +37,25 @@ PROVIDERS = {
 }
 
 SYSTEM = (
-    "You place one contraption on the level in the image. "
-    "The image is the entire level, 30 tiles wide and 9 tiles tall. "
-    "Each tile is 32 by 32 pixels. "
+    "You place one contraption on the level. "
+    "You get an image of the entire level, 30 tiles wide and 9 tall, and the same level as a text grid. "
+    "The grid is exact: take every col and row from it, never from pixel positions in the image. "
+    "Each grid character is one tile. The ruler above the rows gives the column, and the label before a row gives the row. "
+    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
     "Contraptions are one-time use: the user message lists the ones still left. "
     "You have one tool, place_contraption. name picks the contraption. "
-    "col and row are its top-left tile. "
-    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
-    "A contraption can only go on air or on spikes or lava, never on solid tiles, the exit, or the player. "
-    "Stone, the wooden bridge, the crate, and the barred door are solid. "
-    "The gold platform can be jumped up through. Spikes kill. The green flag is the exit. "
-    "Pale blue ice is solid and slippery. The red spring on a coil is solid and bounces you high. "
-    "Glowing orange-red lava kills on touch. Brown cracked rock is solid but falls when stood on. "
-    "The character is the player. "
+    "col and row are its top-left tile, and it covers the width and height listed for it from there. "
+    "Every tile it covers must be air (.) or spikes (^) or lava (L). "
+    "It can never cover stone, a bridge, a platform, a crate, a door, a spring, cracked rock, the exit (E), or the player (P). "
+    "Check each covered tile in the grid before you answer. "
+    "Spikes and lava kill. The gold platform can be jumped up through. Ice is solid and slippery. "
+    "The spring is solid and bounces the player high. Cracked rock falls when stood on. "
     "Pick the contraption that fits what the player asks for and put it on the thing they name. "
-    "The floor is the bottom row, so covering a floor tile uses the row above it. "
+    "To cover something on the floor, put the contraption in the row above the floor. "
+    "Unless the player asks for the air, rest the contraption on the floor or on a solid tile, not floating. "
+    "The grid is followed by every named tile run with its row and columns: use those numbers. "
     "If they do not name a place or a contraption, cover the spikes with whatever fits. "
-    "Do not cover the player or the exit. Call the tool once."
+    "Call the tool once."
 )
 
 
@@ -166,8 +168,8 @@ def warm() -> None:
     _give(host, conn)
 
 
-def ask(prompt: str, level_png: bytes, stock: Stock) -> Placed | AgentMiss:
-    """Send a PNG of the whole level, the stock left, and the player's sentence."""
+def ask(prompt: str, level_png: bytes, grid: str, stock: Stock) -> Placed | AgentMiss:
+    """Send the whole level as a PNG and a coordinate grid, the stock left, and the player's sentence."""
     if not stock:
         return AgentMiss("no contraptions left")
     chosen = provider()
@@ -185,7 +187,13 @@ def ask(prompt: str, level_png: bytes, stock: Stock) -> Placed | AgentMiss:
         # Image before text: the unchanged level is a cacheable prefix.
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": [image, {"type": "text", "text": f"Left: {describe(stock)}.\n{prompt}"}]},
+            {
+                "role": "user",
+                "content": [
+                    image,
+                    {"type": "text", "text": f"Grid:\n{grid}\n\nLeft: {describe(stock)}.\n{prompt}"},
+                ],
+            },
         ],
         "tools": [tool(stock)],
         "tool_choice": {"type": "function", "function": {"name": "place_contraption"}},
