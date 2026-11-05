@@ -423,6 +423,7 @@ def _effects() -> dict[str, array.array]:
         "dash": _dash(),
         "bonk": _bonk(),
         "death": _death(),
+        "collect": _sweep(0.14, 740.0, 1480.0, 0.04, 0.8, 6),
     }
 
 
