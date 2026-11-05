@@ -37,10 +37,18 @@ EXIT = frozenset({(27, 6), (28, 6), (27, 7), (28, 7)})
 
 @dataclass(frozen=True)
 class Level:
+    """`tokens` is the starting balance when each prompt costs one; None is free.
+
+    A checkpoint is a zone and the spawn it moves the respawn to, in map order.
+    """
+
     world: World
     entities: Entities
     spawn: Vec2
     stock: Stock
+    tokens: int | None = None
+    checkpoints: tuple[tuple[Rect, Vec2], ...] = ()
+    hint: str = ""
 
 
 def open_level() -> Level:

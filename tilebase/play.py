@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass, replace
 
 from tilebase.art import tile_drawer
-from tilebase.credits import finite_ledger
+from tilebase.credits import InsufficientCredits, charge, finite_ledger, grant
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
@@ -26,6 +26,8 @@ from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 TILE = 32
 # Two 10 s socket attempts plus slack. Past this, "placing" gives up.
 PLACE_DEADLINE = 25.0
+# After the talk key is let go, words still in flight get this long to land.
+RELEASE_GRACE = 0.9
 VIEW = Size(640, 360)
 WINDOW_SCALE = 2
 TICK = 1.0 / 120.0
@@ -257,14 +259,26 @@ async def run() -> None:
         return
     from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
     from tilebase.speech import ListenError, Transcript
-    from tilebase.box import level_surface, open_level, overlaps_exit
+    from tilebase.box import level_surface, overlaps_exit
     from tilebase.contraptions import Placement, place, stock_line
+
+    if choice == "trial":
+        from tilebase.trial import open_level
+    else:
+        from tilebase.box import open_level
 
     level = open_level()
     world = level.world
     entities = level.entities
     stock = level.stock
     start = level.spawn
+    # A paid level spends one token per prompt, held-to-talk, refunded on a miss.
+    paid = level.tokens is not None
+    checkpoint = -1
+    charged = False
+    spoken: list[str] = []
+    interim = ""
+    released_at: float | None = None
     prompt = ""
     asking = False
     listening = False
@@ -276,11 +290,11 @@ async def run() -> None:
     asyncio.create_task(asyncio.to_thread(warm))
     heard: asyncio.Queue[object] = asyncio.Queue()
     mic: asyncio.Task[None] | None = None
-    notice = "name a tile   enter   v talk"
+    notice = level.hint or "name a tile   enter   v talk"
     edited = False
     cleared = False
     ground = Ground()
-    ledger = finite_ledger(0)
+    ledger = finite_ledger(level.tokens or 0)
     counter = CounterLook()
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
@@ -301,14 +315,15 @@ async def run() -> None:
     cam = clamp_cam(p.body.rect.center, world, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
-    async def _hear() -> None:
+    async def _hear(hold: bool = False) -> None:
+        """Feed transcripts to the loop. Held talk keeps going past a pause."""
         from tilebase.speech import listen
 
         async for event in listen():
             heard.put_nowait(event)
             if isinstance(event, ListenError):
                 return
-            if isinstance(event, Transcript) and event.final:
+            if isinstance(event, Transcript) and event.final and not hold:
                 return
 
     def start_ask(text: str) -> asyncio.Task[object]:
@@ -321,7 +336,9 @@ async def run() -> None:
             glyph_rows(world), (int(center.x // TILE), int(center.y // TILE))
         )
         return asyncio.create_task(
-            asyncio.to_thread(ask, text, _frame_png(sheet), stock, grid)
+            asyncio.to_thread(
+                ask, text, _frame_png(sheet), stock, grid, (world.cols, world.rows)
+            )
         )
 
     def guess(text: str) -> None:
@@ -334,9 +351,16 @@ async def run() -> None:
         guess_job = start_ask(text)
 
     def submit(text: str) -> None:
-        nonlocal notice, place_job, guess_job, guess_text, place_started
+        nonlocal notice, place_job, guess_job, guess_text, place_started, ledger, charged
         if place_job is not None:
             return
+        if paid:
+            paying = charge(ledger, 1, reason="prompt", stage="place")
+            if isinstance(paying, InsufficientCredits):
+                notice = "no tokens left   r restarts"
+                return
+            ledger = paying.ledger
+            charged = True
         notice = "placing"
         place_started = pygame.time.get_ticks() / 1000.0
         if guess_job is not None and _same_words(text, guess_text):
@@ -346,8 +370,17 @@ async def run() -> None:
         guess_job = None
         guess_text = ""
 
+    def refund() -> None:
+        """Nothing landed, so the prompt was not worth a token."""
+        nonlocal ledger, charged, notice
+        if charged:
+            ledger = grant(ledger, 1, reason="refund")
+            notice += "   token back"
+        charged = False
+
     def finish_place(result: object) -> None:
-        nonlocal world, stock, edited, notice
+        nonlocal world, stock, edited, notice, charged
+        placed = None
         if isinstance(result, Placed):
             placed = place(
                 world, entities, stock, result.name, result.col, result.row, p.body.rect
@@ -361,16 +394,76 @@ async def run() -> None:
                 notice = placed.reason
         elif isinstance(result, AgentMiss):
             notice = result.message
+        if isinstance(placed, Placement):
+            charged = False
+        else:
+            refund()
+
+    def can_prompt() -> bool:
+        nonlocal notice
+        if paid and (ledger.balance or 0) < 1:
+            notice = "no tokens left   r restarts"
+            return False
+        return True
+
+    def end_talk() -> None:
+        """The held talk is over: send what was said, which spends the token."""
+        nonlocal listening, asking, prompt, interim, released_at, mic
+        text = " ".join([*spoken, interim]).strip()
+        spoken.clear()
+        interim = ""
+        released_at = None
+        listening = False
+        asking = False
+        prompt = ""
+        if mic is not None and not mic.done():
+            mic.cancel()
+        if text:
+            submit(text)
+        else:
+            notice_set("heard nothing")
+
+    def notice_set(text: str) -> None:
+        nonlocal notice
+        notice = text
+
+    def restart() -> None:
+        nonlocal level, world, entities, stock, start, ledger, counter, ground
+        nonlocal edited, cleared, checkpoint, place_job, guess_job, guess_text
+        nonlocal p, prev_rect, charged
+        level = open_level()
+        world, entities, stock, start = level.world, level.entities, level.stock, level.spawn
+        ledger = finite_ledger(level.tokens or 0)
+        counter = CounterLook()
+        ground = Ground()
+        edited = cleared = charged = False
+        checkpoint = -1
+        place_job = guess_job = None
+        guess_text = ""
+        p = player.spawn(start.x, start.y)
+        prev_rect = p.body.rect
+        notice_set("restarted   " + level.hint)
 
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif (
+                event.type == pygame.KEYUP
+                and event.key == pygame.K_v
+                and paid
+                and listening
+                and released_at is None
+            ):
+                released_at = pygame.time.get_ticks() / 1000.0
             elif event.type == pygame.KEYDOWN and listening:
                 if event.key == pygame.K_ESCAPE:
                     listening = False
                     asking = False
+                    spoken.clear()
+                    interim = ""
+                    released_at = None
                     if mic is not None and not mic.done():
                         mic.cancel()
             elif event.type == pygame.KEYDOWN and asking:
@@ -389,14 +482,22 @@ async def run() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == pygame.K_RETURN:
+                elif event.key == pygame.K_RETURN and can_prompt():
                     asking = True
                     prompt = ""
-                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()):
+                elif (
+                    event.key == pygame.K_v
+                    and not WEB
+                    and (mic is None or mic.done())
+                    and place_job is None
+                    and can_prompt()
+                ):
                     listening = True
                     asking = True
                     prompt = ""
-                    mic = asyncio.create_task(_hear())
+                    mic = asyncio.create_task(_hear(hold=paid))
+                elif event.key == pygame.K_r and paid:
+                    restart()
                 elif event.key == pygame.K_r:
                     p = player.spawn(start.x, start.y)
                     prev_rect = p.body.rect
@@ -422,6 +523,16 @@ async def run() -> None:
                 listening = False
                 asking = False
                 notice = event.message
+            elif listening and paid and isinstance(event, Transcript):
+                if event.final:
+                    spoken.append(event.text)
+                    interim = ""
+                else:
+                    interim = event.text
+                prompt = " ".join([*spoken, interim]).strip()
+                guess(prompt)
+                if event.final and released_at is not None:
+                    end_talk()
             elif listening and isinstance(event, Transcript):
                 prompt = event.text
                 if not event.final:
@@ -436,6 +547,8 @@ async def run() -> None:
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
+        if listening and released_at is not None and now - released_at > RELEASE_GRACE:
+            end_talk()
         if place_job is not None and place_job.done():
             job, place_job = place_job, None
             error = job.exception()
@@ -444,6 +557,7 @@ async def run() -> None:
             # The thread keeps running, but its answer is dropped.
             place_job = None
             notice = "model timed out"
+            refund()
         held = read_held(pygame, pygame.key.get_pressed(), pad)
         if asking or place_job is not None:
             held = Held(False, False, False, False, False, False)
@@ -492,6 +606,11 @@ async def run() -> None:
                 prev_rect = p.body.rect
                 world = mend(world, ground)
                 ground = Ground()
+            elif checkpoint + 1 < len(level.checkpoints) and p.on_ground and _overlap(
+                p.body.rect, level.checkpoints[checkpoint + 1][0]
+            ):
+                checkpoint += 1
+                start = level.checkpoints[checkpoint][1]
             elif edited and (
                 overlaps_mark(world, p.body.rect, "goal")
                 or overlaps_exit(p.body.rect, entities)
@@ -526,6 +645,8 @@ async def run() -> None:
             look,
             dashes_left=p.dashes_left,
         )
+        if pygame.key.get_pressed()[pygame.K_TAB]:
+            _overview(screen, level_surface(world, center, p, look, p.dashes_left))
         counter = counter_step(counter, ledger.balance, frame_dt)
         draw_balance(screen, ledger.balance, VIEW.w, counter)
         if cleared:
@@ -666,6 +787,28 @@ def _bar(screen: object, line: str, stock: str) -> None:
     _ink(screen, line, 8, 338, scale=2)
     if stock:
         _ink(screen, stock, 640 - 8 - 6 * len(stock), 342, scale=1)
+
+
+def _overlap(a: Rect, b: Rect) -> bool:
+    return not (
+        a.x + a.w <= b.x or b.x + b.w <= a.x or a.y + a.h <= b.y or b.y + b.h <= a.y
+    )
+
+
+def _overview(screen: object, sheet: object) -> None:
+    """The whole level shrunk into the view, for planning the next prompt."""
+    import pygame
+
+    w, h = sheet.get_size()
+    scale = min((VIEW.w - 16) / w, (VIEW.h - 44) / h)
+    small = pygame.transform.smoothscale(sheet, (round(w * scale), round(h * scale)))
+    shade = pygame.Surface((VIEW.w, VIEW.h), pygame.SRCALPHA)
+    shade.fill((10, 8, 20, 170))
+    screen.blit(shade, (0, 0))
+    x = (VIEW.w - small.get_width()) // 2
+    y = (VIEW.h - 28 - small.get_height()) // 2
+    screen.blit(small, (x, y))
+    pygame.draw.rect(screen, (236, 224, 196), (x - 2, y - 2, small.get_width() + 4, small.get_height() + 4), 2)
 
 
 def _has_vsync(pygame: object) -> bool:
