@@ -23,6 +23,7 @@ Most "AI in a game" is a chatterbot or a second shooter. We want the AI to be a 
 ### live demo video with voice
 
 On YouTube: [youtu.be/cwMLeEJvMvo](https://youtu.be/cwMLeEJvMvo)
+Second level: https://vimeo.com/1243897137
 
 [![Chris demo](https://img.youtube.com/vi/cwMLeEJvMvo/hqdefault.jpg)](https://youtu.be/cwMLeEJvMvo)
 
