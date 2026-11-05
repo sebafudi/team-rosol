@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-MODEL = "google/gemini-3.1-flash-lite"
+MODEL = "google/gemini-3.5-flash-lite"
 
 SYSTEM = (
     "You place one box on the level in the image. "
@@ -61,6 +61,7 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
+        "reasoning": {"effort": "medium"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
