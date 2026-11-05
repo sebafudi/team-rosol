@@ -20,6 +20,7 @@ LISTEN_URL = (
     "&sample_rate=16000"
     "&channels=1"
     "&interim_results=true"
+    "&endpointing=500"
     "&punctuate=true"
     "&smart_format=true"
 )
@@ -100,6 +101,10 @@ async def _send_audio(socket, audio: asyncio.Queue[bytes]) -> None:
 
 
 async def _read_transcripts(socket) -> AsyncIterator[Transcript | ListenError]:
+    """Deepgram finalizes a sentence in several `is_final` segments and marks the
+    last one `speech_final`. Segments are joined so a pause mid-command does not
+    cut it short; only the end of the utterance yields a final transcript."""
+    spoken: list[str] = []
     async for raw in socket:
         if isinstance(raw, bytes):
             continue
@@ -111,12 +116,19 @@ async def _read_transcripts(socket) -> AsyncIterator[Transcript | ListenError]:
         if kind != "Results":
             continue
         alternatives = message.get("channel", {}).get("alternatives") or []
-        if not alternatives:
-            continue
-        text = (alternatives[0].get("transcript") or "").strip()
-        if not text:
-            continue
-        yield Transcript(text, bool(message.get("is_final")))
+        text = (alternatives[0].get("transcript") or "").strip() if alternatives else ""
+        if message.get("is_final"):
+            if text:
+                spoken.append(text)
+            if message.get("speech_final") and spoken:
+                yield Transcript(" ".join(spoken), True)
+                spoken = []
+            elif spoken:
+                yield Transcript(" ".join(spoken), False)
+        elif text:
+            yield Transcript(" ".join([*spoken, text]), False)
+    if spoken:
+        yield Transcript(" ".join(spoken), True)
 
 
 def main() -> None:
