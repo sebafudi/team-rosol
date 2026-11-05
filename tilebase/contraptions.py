@@ -14,8 +14,9 @@ from tilebase.geom import Rect, Vec2
 from tilebase.tiles import World, cell_at, put_cell
 
 # Placing may overwrite air and hazards (that is how a crate covers spikes).
-# Anything the player can already stand on, jump through, or finish on stays.
-PROTECTED_MARKS = frozenset({"blocks", "oneway", "goal"})
+# Anything the player can already stand on, jump through, or finish on stays,
+# and so do token pickups, or a careless placement could eat the next prompt.
+PROTECTED_MARKS = frozenset({"blocks", "oneway", "goal", "token"})
 
 Stock = tuple[str, ...]
 
