@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import math
 
-from tilebase.contraptions import Stock, place, stock_line
+from tilebase.contraptions import Placement, Stock, place, stock_line
 from tilebase.edit import Entities, define_entities
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import hurt_at, level_tiles, overlaps_mark
@@ -289,13 +289,13 @@ async def run_level(screen, audio=None) -> None:
             placed = place(
                 level, entities, stock, result.name, result.col, result.row, p.body.rect
             )
-            if isinstance(placed, Refused):
-                notice = placed.reason
-            else:
+            if isinstance(placed, Placement):
                 level = placed.world
                 stock = placed.stock
                 edited = True
                 notice = f"{result.name} at {result.col},{result.row}"
+            else:
+                notice = placed.reason
         elif isinstance(result, AgentMiss):
             notice = result.message
 
