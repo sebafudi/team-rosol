@@ -166,8 +166,13 @@ def main() -> None:
     screen = pygame.display.set_mode(
         (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
     )
-    pygame.display.set_caption("team-rosol — movement sandbox")
-    font = pygame.font.Font(None, 16)
+    pygame.display.set_caption("Grok the Gap")
+    from tilebase.title import show
+
+    if show(screen) != "play":
+        pygame.quit()
+        return
+    font = None
     world = sandbox()
     start = spawn_point(SANDBOX)
     jump_codes = _codes(pygame, JUMP_KEYS)
@@ -281,6 +286,8 @@ def main() -> None:
             dashes_left=p.dashes_left,
         )
         if show_debug:
+            if font is None:
+                font = pygame.font.Font(None, 16)
             lines = (
                 f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
                 f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",

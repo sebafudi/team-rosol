@@ -76,6 +76,16 @@ def world() -> World:
 
 
 def main() -> None:
+    import pygame
+
+    from tilebase.loop import open_fullscreen
+    from tilebase.title import show
+
+    screen, canvas, fitted = open_fullscreen(SCREEN)
+    pygame.display.set_caption("Grok the Gap")
+    if show(screen) != "play":
+        pygame.quit()
+        return
     run(
         world=world(),
         body=Body(Rect(32, 32, 12, 14)),
@@ -83,4 +93,5 @@ def main() -> None:
         plan_move=plan_move,
         blocks=blocks,
         draw_body=draw_body,
+        window=(screen, canvas, fitted),
     )
