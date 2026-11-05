@@ -1,3 +1,4 @@
+from tilebase.art import tile_drawer
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.loop import run
 from tilebase.move import Body, Frame
@@ -34,8 +35,7 @@ def draw_empty(screen: object, rect: Rect) -> None:
     return None
 
 
-def draw_solid(screen: object, rect: Rect) -> None:
-    _rect(screen, rect, (48, 48, 56))
+draw_solid = tile_drawer("solid")
 
 
 def draw_body(screen: object, rect: Rect) -> None:

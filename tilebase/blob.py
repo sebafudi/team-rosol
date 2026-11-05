@@ -30,6 +30,7 @@ SEAM_SPENT = (156, 184, 222)
 OMEGA = 30.0
 ZETA = 0.42
 MAX_STEP = 1.0 / 240.0
+SETTLE = 9.0  # how fast a stopped ball rocks back eyes-up
 
 
 class PlayerLike(Protocol):
@@ -169,6 +170,10 @@ def update_look(look: Look, player: PlayerLike, input_x: int, input_y: int, dt: 
     still = _approach(look.still, 1.0 if calm else 0.0, 4.0, dt)
     breathe = (look.breathe + dt * math.tau / 2.6) % math.tau
     roll = (look.roll + vx * dt / RADIUS) % math.tau
+    if abs(vx) < 20.0 and not player.dashing:
+        # Settle eyes-up once the ball stops, the short way round.
+        tilt = (roll + math.pi) % math.tau - math.pi
+        roll = (roll - tilt * (1.0 - math.exp(-SETTLE * dt))) % math.tau
 
     return Look(
         sx=sx, sy=sy, vsx=vsx, vsy=vsy, lean=lean, vlean=vlean, angle=angle,
