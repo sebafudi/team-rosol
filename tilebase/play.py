@@ -183,7 +183,15 @@ async def run() -> None:
     audio.start()
     from tilebase.title import show
 
-    if await show(screen) != "play":
+    choice = await show(screen, picker=True)
+    if choice == "quit":
+        audio.stop()
+        pygame.quit()
+        return
+    if choice == "lifts":
+        from tilebase.city import run_level
+
+        await run_level(screen, audio)
         audio.stop()
         pygame.quit()
         return

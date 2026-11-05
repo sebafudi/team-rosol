@@ -10,6 +10,7 @@ ice shelf a jump reaches the sill under the crystal.
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 from tilebase.art import tile_drawer
@@ -20,6 +21,7 @@ from tilebase.play import (
     DASH_KEYS,
     JUMP_KEYS,
     TICK,
+    WEB,
     Latch,
     _codes,
     axis,
@@ -236,12 +238,33 @@ def main() -> None:
 
     import pygame
 
-    from tilebase import art, blob, player
+    from tilebase.audio import Audio
 
     os.environ.setdefault("SDL_HINT_RENDER_VSYNC", "1")
     pygame.init()
-    screen = pygame.display.set_mode((VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1)
+    if WEB:
+        screen = pygame.display.set_mode((VIEW.w, VIEW.h))
+    else:
+        screen = pygame.display.set_mode(
+            (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
+        )
     pygame.display.set_caption("Grok the Gap — city lifts")
+    audio = Audio()
+    audio.start()
+    try:
+        asyncio.run(run_level(screen, audio))
+    finally:
+        audio.stop()
+        pygame.quit()
+
+
+async def run_level(screen, audio=None) -> None:
+    """Play the cable lifts on an existing window. Esc closes the level."""
+    import pygame
+
+    from tilebase import art, blob, player
+
+    canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
     level = world()
     start = spawn_point()
     jump_codes = _codes(pygame, JUMP_KEYS)
@@ -313,6 +336,8 @@ def main() -> None:
             prev_rect = p.body.rect
             p, movers = ride_step(p, movers, level, blocks, inp, TICK)
             tick_no += 1
+            if audio is not None:
+                audio.play_events(p.events, p.impact)
             look = blob.update_look(look, p, ix, iy, TICK)
             feet = Vec2(p.body.rect.center.x, p.body.rect.y + p.body.rect.h)
             puffs = blob.emit_puffs(puffs, p, feet, tick_no)
@@ -326,6 +351,9 @@ def main() -> None:
             if "land" in p.events and p.impact > 800:
                 shake = max(shake, 0.06)
             if p.body.rect.y > level.rows * TILE + 64:
+                if audio is not None:
+                    audio.play("death")
+                    shake = max(shake, 0.2)
                 p, movers, cleared = reset()
                 prev_rect = p.body.rect
 
@@ -341,19 +369,39 @@ def main() -> None:
             round(cam.x - VIEW.w / 2 + math.sin(now * 91.0) * jitter),
             round(cam.y - VIEW.h / 2 + math.cos(now * 77.0) * jitter),
         )
-        art.draw_backdrop(screen, cam, Size(level.cols * TILE, level.rows * TILE), VIEW)
-        draw_scene(screen, level, movers, origin, now, cleared)
-        blob.draw_puffs(screen, puffs, origin)
+        art.draw_backdrop(canvas, cam, Size(level.cols * TILE, level.rows * TILE), VIEW)
+        draw_scene(canvas, level, movers, origin, now, cleared)
+        blob.draw_puffs(canvas, puffs, origin)
         art.draw_player(
-            screen,
+            canvas,
             Vec2(center.x - origin.x, center.y - origin.y),
             p,
             look,
             dashes_left=p.dashes_left,
         )
+        _present_level(screen, canvas)
         pygame.display.flip()
-        clock.tick(0 if _has_vsync(pygame) else 240)
-    pygame.quit()
+        if WEB:
+            clock.tick(60)
+        else:
+            clock.tick(0 if _has_vsync(pygame) else 240)
+        await asyncio.sleep(0)
+
+
+def _present_level(screen, canvas) -> None:
+    """Fit the whole chamber in the window the menu already opened."""
+    import pygame
+
+    sw, sh = screen.get_size()
+    cw, ch = canvas.get_size()
+    if (sw, sh) == (cw, ch):
+        screen.blit(canvas, (0, 0))
+        return
+    scale = min(sw / cw, sh / ch)
+    tw, th = max(1, round(cw * scale)), max(1, round(ch * scale))
+    screen.fill((12, 16, 28))
+    image = pygame.transform.smoothscale(canvas, (tw, th)) if scale < 1 else pygame.transform.scale(canvas, (tw, th))
+    screen.blit(image, ((sw - tw) // 2, (sh - th) // 2))
 
 
 def _has_vsync(pygame: object) -> bool:
