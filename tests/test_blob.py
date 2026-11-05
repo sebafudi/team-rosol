@@ -1,6 +1,7 @@
+import math
 import os
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tilebase.blob import (
     Look,
@@ -89,6 +90,16 @@ class LookTest(unittest.TestCase):
 class DrawTest(unittest.TestCase):
     def setUp(self) -> None:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
+    def test_rolls_with_distance_while_moving(self) -> None:
+        look = step(rest(), FakePlayer(vel=Vec2(240.0, 0.0)), frames=6)
+        self.assertAlmostEqual(look.roll, 240.0 * 6 * DT / 13.0, places=6)
+
+    def test_stopped_ball_rocks_back_eyes_up(self) -> None:
+        tipped = replace(rest(), roll=2.5)
+        look = step(tipped, FakePlayer(), frames=60)
+        tilt = (look.roll + math.pi) % math.tau - math.pi
+        self.assertLess(abs(tilt), 0.01)
 
     def test_draws_on_a_surface(self) -> None:
         import pygame
