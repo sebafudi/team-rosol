@@ -90,6 +90,18 @@ def tile_image(name: str, size: int) -> object:
     )
 
 
+def icon_image(name: str, size: int, color: tuple[int, int, int]) -> object:
+    """A white icon from `assets/icons`, scaled to `size` and tinted `color`."""
+    import pygame
+
+    def make() -> object:
+        image = pygame.transform.smoothscale(_load(ASSETS / "icons" / f"{name}.png"), (size, size))
+        image.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        return image
+
+    return _cached(("icon", name, size, color), make)
+
+
 def tile_drawer(name: str) -> Callable[[object, Rect], None]:
     """A `define(draw=...)` function that paints one tile from the art."""
 
