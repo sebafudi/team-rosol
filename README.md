@@ -6,6 +6,18 @@ A 2D pygame platformer where a human player and an in-game AI share one level. Y
 
 Co-op here means **human + AI on the same map**, not online PvP.
 
+## Right now
+
+These three frames are the browser build of the current game (`scripts/build_web.sh --serve`, then http://localhost:8000). The same screens are what `python -m tilebase.play` opens on the desktop. The AI edit described further down is the goal. What launches today is this title screen and this map.
+
+![Title screen: Grok Bot, The Gap, Play](docs/screenshots/title.png)
+
+![The ball on the left floor, with the gap in the middle](docs/screenshots/ground.png)
+
+![Falling through the open floor](docs/screenshots/fall.png)
+
+Enter, Space, or a click on **Play** leaves the title. The ball starts on the left. Five floor tiles are missing in the middle. Drop through that hole and you come back on the left.
+
 ## Why this exists
 
 Most “AI in a game” is a chatterbot or a second shooter. We want the AI to be a **live level editor** that only acts when you ask, and only by moving things you can see.
@@ -48,34 +60,34 @@ Hackathon time is short, so the stack stays small and the AI stays bounded.
 
 **Feedback.** If the AI moved a platform, you see that platform move. The jury should never have to guess whether the model did anything.
 
-## Run the tile scaffold
-
-The `tilebase` package is that engine base. A platformer, and the in-app AI that rewrites the map, sit on top of it.
+## Run it
 
 ```bash
 pip install -r requirements.txt
-python -m tilebase
-```
-
-`load_map` reads a character grid. `put_cell` returns a new grid with one cell replaced. `plan_move` chooses the body's delta each frame. `move_body` applies that delta and stops on tiles the caller marks as blocking. The demo slides a rectangle with the arrow keys on 32 by 32 tiles. It does not jump.
-
-The window is fullscreen. The camera is framed at 320 by 180 and scaled in whole pixels so that view fills 720p, 1080p, 1440p, 4K, 16:10, and ultrawide displays. Escape closes it.
-
-## Movement sandbox
-
-```bash
 python -m tilebase.play
 ```
 
-Arrows/WASD move, Space/C/Z jump (hold for height), X/Shift dash in 8 directions, R respawn, M mutes the music, F1 debug overlay. Gamepad works too (A jump, B/X dash).
+The window is captioned **Grok the Gap**. The view is 640 by 360 and scaled up to the window. The title screen comes first. Escape quits.
 
-Jumping, wall jumping, dashing, landing, hitting a ceiling, and falling out of the map each play a sound, and a short tune loops from the title screen on. A gap in the demo floor drops you out of the level.
+Arrows or WASD move. Space, C, or Z jumps, and holding the key jumps higher. X or Shift dashes in eight directions. R respawns. M mutes the music. F1 toggles a debug readout. A gamepad works too: A jumps, B or X dashes.
+
+Jumping, wall jumping, dashing, landing, hitting a ceiling, and falling out of the map each play a sound, and a short tune loops from the title screen on. The map is the 20 by 9 demo grid. A five-tile hole in the floor is open. Falling through it plays the death sound and puts you back on the left.
 
 `tilebase/player.py` is the pure controller: run/accel, variable jump with apex hang, coyote time, jump buffering, wall slide and wall jump, one dash charge refilled on landing. Because the hero is a ball, its corners are forgiving: it slips around ceiling corners, pops over low lips, and rolls off a ledge it barely stands on. `tilebase/blob.py` animates the hero: squash and stretch, a roll angle that follows distance travelled and rocks back eyes-up when the ball stops, and dust puffs. `tilebase/art.py` paints it with Nikolas's art from `assets/`: the Grok Bot ball (idle, jump and climb poses) spins as it rolls and turns blue when the dash is spent, tiles come from `assets/tiles/`, and `assets/bg.png` drifts behind the level as parallax. All movement numbers live in `player.Tuning`.
 
-## Play in the browser (optional)
+## Tile scaffold
 
-The web build is optional and may lag behind the desktop game. Nobody keeps it working during development; we check it right before the demo.
+```bash
+python -m tilebase
+```
+
+Same title, then a fullscreen window. The camera is framed at 320 by 180 and scaled in whole pixels so that view fills 720p, 1080p, 1440p, 4K, 16:10, and ultrawide displays. Arrow keys slide a rectangle across the same grid. It does not jump.
+
+`load_map` reads a character grid. `put_cell` returns a new grid with one cell replaced. `plan_move` chooses the body's delta each frame. `move_body` applies that delta and stops on tiles the caller marks as blocking.
+
+## Play in the browser
+
+The screenshots above are this page, from the current play loop. The web build can lag behind the desktop game while people are still changing it, so rebuild before a demo.
 
 ```bash
 pip install pygbag
