@@ -9,22 +9,21 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tilebase.kinds import LEGEND
-
-MODEL = "x-ai/grok-4.7"
+MODEL = "google/gemini-3.5-flash-lite"
 
 SYSTEM = (
-    "You place one box on a tile map. The box is 64 by 64 pixels, "
-    "which is 2 tiles by 2 tiles. Tiles are 32 pixels. "
+    "You place one box on the level in the image. "
+    "The image is the entire level, 20 tiles wide and 9 tiles tall. "
+    "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
     "You have one tool, place_box. col and row are the top-left tile. "
-    "Rows grow downward. "
-    f"{LEGEND}. "
-    "Put the box on the kind the player names. "
-    "col and row are its top-left, and it also fills the next column and the next row. "
+    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
+    "Stone, the wooden bridge, the crate, and the barred door are solid. "
+    "The gold platform can be jumped up through. Spikes kill. The green flag is the exit. "
+    "The orange square is the box if it is already placed. The character is the player. "
+    "Put the box on the thing the player names. "
     "The floor is the bottom row, so covering a floor tile uses the row above it. "
     "If they do not name a place, cover the spikes. "
-    "The image is the screen the player sees right now, before you place anything. "
-    "Do not cover P or E. Call the tool once."
+    "Do not cover the player or the exit. Call the tool once."
 )
 
 
@@ -56,26 +55,26 @@ def api_key() -> str | None:
     return None
 
 
-def ask(prompt: str, grid: str, frame_png: bytes) -> Placed | AgentMiss:
-    """Send the player's sentence, the grid, and a PNG of the screen. Return the tool's tile."""
+def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
+    """Send the player's sentence and a PNG of the whole level. Return the tool's tile."""
     key = api_key()
     if key is None:
         return AgentMiss("OPENROUTER_API_KEY is missing")
     payload = {
         "model": MODEL,
         "temperature": 0,
-        "reasoning": {"effort": "minimal"},
+        "reasoning": {"effort": "medium"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"{grid}\n\nPlayer: {prompt}"},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": "data:image/png;base64,"
-                            + base64.b64encode(frame_png).decode()
+                            + base64.b64encode(level_png).decode()
                         },
                     },
                 ],
