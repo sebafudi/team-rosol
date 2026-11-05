@@ -16,9 +16,11 @@ import sys
 from dataclasses import dataclass
 
 from tilebase.art import tile_drawer
+from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.move import Body
 from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
+from tilebase.tokens import collect, draw_balance
 
 TILE = 32
 VIEW = Size(640, 360)
@@ -183,7 +185,15 @@ async def run() -> None:
     audio.start()
     from tilebase.title import show
 
-    if await show(screen) != "play":
+    choice = await show(screen, picker=True)
+    if choice == "quit":
+        audio.stop()
+        pygame.quit()
+        return
+    if choice == "lifts":
+        from tilebase.city import run_level
+
+        await run_level(screen, audio)
         audio.stop()
         pygame.quit()
         return
@@ -201,6 +211,7 @@ async def run() -> None:
     edited = False
     cleared = False
     font = pygame.font.Font(None, 22)
+    ledger = finite_ledger(0)
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
@@ -309,6 +320,9 @@ async def run() -> None:
             feet = Vec2(p.body.rect.center.x, p.body.rect.y + p.body.rect.h)
             puffs = blob.emit_puffs(puffs, p, feet, tick_no)
             puffs = blob.update_puffs(puffs, TICK)
+            world, ledger, gained = collect(world, p.body.rect, ledger)
+            if gained:
+                audio.play("collect")
             if "dash" in p.events:
                 freeze = DASH_FREEZE
                 shake = max(shake, 0.12)
@@ -353,6 +367,7 @@ async def run() -> None:
             dashes_left=p.dashes_left,
         )
         draw_marks(screen, origin, entities)
+        draw_balance(screen, ledger.balance, VIEW.w)
         if cleared:
             line = "you made it"
         elif asking:

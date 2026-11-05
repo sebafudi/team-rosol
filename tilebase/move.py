@@ -42,13 +42,25 @@ class Moved:
 Blocks = Callable[[Cell, Body, Vec2], bool]
 
 
-def move_body(world: World, body: Body, delta: Vec2, blocks: Blocks) -> Moved:
+def move_body(
+    world: World,
+    body: Body,
+    delta: Vec2,
+    blocks: Blocks,
+    solids: tuple[Rect, ...] = (),
+) -> Moved:
     """Move on X, then Y. `body` passed to `blocks` is the pose before that step.
 
     Each step is at most one tile wide so a one-tile wall cannot be skipped.
+    `solids` are extra rects (moving platforms) that block the same way tiles do.
+    Touching an edge is not a hit, so a body can stand on a solid.
     """
-    rect, blocked_x = _move_axis(world, body, delta.x, axis="x", blocks=blocks)
-    rect, blocked_y = _move_axis(world, Body(rect), delta.y, axis="y", blocks=blocks)
+    rect, blocked_x = _move_axis(
+        world, body, delta.x, axis="x", blocks=blocks, solids=solids
+    )
+    rect, blocked_y = _move_axis(
+        world, Body(rect), delta.y, axis="y", blocks=blocks, solids=solids
+    )
     return Moved(Body(rect), blocked_x, blocked_y)
 
 
@@ -59,6 +71,7 @@ def _move_axis(
     *,
     axis: str,
     blocks: Blocks,
+    solids: tuple[Rect, ...],
 ) -> tuple[Rect, bool]:
     if amount == 0:
         return body.rect, False
@@ -72,10 +85,10 @@ def _move_axis(
         rect = _shift(rect, step if axis == "x" else 0.0, step if axis == "y" else 0.0)
         probe = Vec2(step, 0.0) if axis == "x" else Vec2(0.0, step)
         hits = tuple(
-            cell
+            cell.rect
             for cell in cells_overlapping(world, rect)
             if blocks(cell, before, probe)
-        )
+        ) + tuple(solid for solid in solids if _overlaps(rect, solid))
         remaining -= step
         if not hits:
             continue
@@ -85,19 +98,28 @@ def _move_axis(
     return rect, blocked
 
 
+def _overlaps(a: Rect, b: Rect) -> bool:
+    return (
+        a.x < b.x + b.w - 1e-9
+        and b.x < a.x + a.w - 1e-9
+        and a.y < b.y + b.h - 1e-9
+        and b.y < a.y + a.h - 1e-9
+    )
+
+
 def _shift(rect: Rect, dx: float, dy: float) -> Rect:
     return Rect(rect.x + dx, rect.y + dy, rect.w, rect.h)
 
 
-def _flush(rect: Rect, hits: tuple[Cell, ...], *, axis: str, direction: float) -> Rect:
+def _flush(rect: Rect, hits: tuple[Rect, ...], *, axis: str, direction: float) -> Rect:
     if axis == "x" and direction > 0:
-        edge = min(cell.rect.x for cell in hits)
+        edge = min(hit.x for hit in hits)
         return Rect(edge - rect.w, rect.y, rect.w, rect.h)
     if axis == "x":
-        edge = max(cell.rect.x + cell.rect.w for cell in hits)
+        edge = max(hit.x + hit.w for hit in hits)
         return Rect(edge, rect.y, rect.w, rect.h)
     if direction > 0:
-        edge = min(cell.rect.y for cell in hits)
+        edge = min(hit.y for hit in hits)
         return Rect(rect.x, edge - rect.h, rect.w, rect.h)
-    edge = max(cell.rect.y + cell.rect.h for cell in hits)
+    edge = max(hit.y + hit.h for hit in hits)
     return Rect(rect.x, edge, rect.w, rect.h)

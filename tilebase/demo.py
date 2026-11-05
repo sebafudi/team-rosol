@@ -3,20 +3,22 @@ from tilebase.geom import Rect, Size, Vec2
 from tilebase.loop import run
 from tilebase.move import Body, Frame
 from tilebase.tiles import Cell, World, define, load_map
+from tilebase.tokens import TOKEN_MARK, draw_token
 
 TILE = 32
 # World pixels the camera frames. The window matches the display.
 SCREEN = Size(320, 180)
 
+# `o` is a collectible token. It sits in open air and does not block.
 ROWS = (
     "####################",
     "#..................#",
     "#..................#",
     "#..####............#",
-    "#..................#",
-    "#.............###..#",
-    "#..................#",
-    "#..................#",
+    "#..............o...#",
+    "#...o.........###..#",
+    "#.........o........#",
+    "#...o.o........o...#",
     "########.....#######",
 )
 
@@ -68,6 +70,7 @@ def world() -> World:
         (
             define(".", id="empty", draw=draw_empty, marks=frozenset()),
             define("#", id="solid", draw=draw_solid, marks=frozenset({"blocks"})),
+            define("o", id="token", draw=draw_token, marks=frozenset({TOKEN_MARK})),
         ),
         tile_size=TILE,
     )

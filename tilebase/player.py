@@ -104,10 +104,12 @@ def step(
     blocks: Blocks,
     dt: float,
     tuning: Tuning = Tuning(),
+    extras: tuple[Rect, ...] = (),
 ) -> Player:
+    """Step the controller. `extras` are solid rects besides the tile map."""
     t = tuning
     events: set[str] = set()
-    grounded = _touching(world, p.body, 0, 1, blocks) and p.vel.y >= 0
+    grounded = _touching(world, p.body, 0, 1, blocks, extras) and p.vel.y >= 0
 
     coyote = t.coyote_time if grounded else max(0.0, p.coyote - dt)
     jump_buffer = (
@@ -198,11 +200,13 @@ def step(
                         vy *= t.jump_cut
 
     delta = Vec2(vx * dt, vy * dt)
-    moved = move_body(world, p.body, delta, blocks)
+    moved = move_body(world, p.body, delta, blocks, extras)
     if moved.blocked_y and vy < 0:
-        moved = _slip_corner(world, p.body, delta, t.corner_correction, blocks) or moved
+        moved = _slip_corner(
+            world, p.body, delta, t.corner_correction, blocks, extras
+        ) or moved
     if moved.blocked_x and vx != 0 and (dashing or not grounded):
-        moved = _pop_ledge(world, p.body, delta, t.ledge_pop, blocks) or moved
+        moved = _pop_ledge(world, p.body, delta, t.ledge_pop, blocks, extras) or moved
     body = moved.body
     fall_speed = vy
     if moved.blocked_x:
@@ -213,14 +217,14 @@ def step(
             var_jump = 0.0
         vy = 0.0
 
-    on_ground = vy >= 0 and _touching(world, body, 0, 1, blocks)
+    on_ground = vy >= 0 and _touching(world, body, 0, 1, blocks, extras)
     impact = 0.0
     if on_ground and not p.on_ground:
         events.add("land")
         impact = max(0.0, fall_speed)
     if p.on_ground and not on_ground:
         events.add("leave_ground")
-    wall_dir = _wall_near(world, body, 1.0, move_x, blocks)
+    wall_dir = _wall_near(world, body, 1.0, move_x, blocks, extras)
     if wall_dir != 0 and p.wall_dir == 0:
         events.add("wall_touch")
     wall_sliding = (
@@ -289,32 +293,42 @@ def _dash_dir(inp: Input, facing: int) -> Vec2:
 
 
 def _slip_corner(
-    world: World, body: Body, delta: Vec2, reach: float, blocks: Blocks
+    world: World,
+    body: Body,
+    delta: Vec2,
+    reach: float,
+    blocks: Blocks,
+    extras: tuple[Rect, ...] = (),
 ) -> Moved | None:
     """Head clipped a ceiling corner: shift sideways (toward travel first) to clear it."""
     first = _sign(delta.x) or 1
     for offset in range(1, int(reach) + 1):
         for side in (first, -first):
-            shifted = move_body(world, body, Vec2(side * offset, 0), blocks)
+            shifted = move_body(world, body, Vec2(side * offset, 0), blocks, extras)
             if shifted.blocked_x:
                 continue
-            moved = move_body(world, shifted.body, delta, blocks)
+            moved = move_body(world, shifted.body, delta, blocks, extras)
             if not moved.blocked_y:
                 return moved
     return None
 
 
 def _pop_ledge(
-    world: World, body: Body, delta: Vec2, reach: float, blocks: Blocks
+    world: World,
+    body: Body,
+    delta: Vec2,
+    reach: float,
+    blocks: Blocks,
+    extras: tuple[Rect, ...] = (),
 ) -> Moved | None:
     """Blocked by a lip at most `reach` px tall: the round body rolls up onto it."""
     for lift in range(1, int(reach) + 1):
-        lifted = move_body(world, body, Vec2(0, -lift), blocks)
+        lifted = move_body(world, body, Vec2(0, -lift), blocks, extras)
         if lifted.blocked_y:
             return None
-        across = move_body(world, lifted.body, Vec2(delta.x, 0), blocks)
+        across = move_body(world, lifted.body, Vec2(delta.x, 0), blocks, extras)
         if not across.blocked_x:
-            down = move_body(world, across.body, Vec2(0, delta.y), blocks)
+            down = move_body(world, across.body, Vec2(0, delta.y), blocks, extras)
             return Moved(down.body, False, down.blocked_y)
     return None
 
@@ -336,18 +350,30 @@ def _edge_roll(world: World, body: Body, min_support: float, blocks: Blocks) -> 
 
 
 def _wall_near(
-    world: World, body: Body, reach: float, prefer: int, blocks: Blocks
+    world: World,
+    body: Body,
+    reach: float,
+    prefer: int,
+    blocks: Blocks,
+    extras: tuple[Rect, ...] = (),
 ) -> int:
     """Side (-1/1) of a wall within `reach` px, 0 if none. Ties go to `prefer`."""
     sides = (prefer, -prefer) if prefer != 0 else (1, -1)
     for side in sides:
-        if move_body(world, body, Vec2(side * reach, 0), blocks).blocked_x:
+        if move_body(world, body, Vec2(side * reach, 0), blocks, extras).blocked_x:
             return side
     return 0
 
 
-def _touching(world: World, body: Body, dx: float, dy: float, blocks: Blocks) -> bool:
-    moved = move_body(world, body, Vec2(dx, dy), blocks)
+def _touching(
+    world: World,
+    body: Body,
+    dx: float,
+    dy: float,
+    blocks: Blocks,
+    extras: tuple[Rect, ...] = (),
+) -> bool:
+    moved = move_body(world, body, Vec2(dx, dy), blocks, extras)
     return moved.blocked_x or moved.blocked_y
 
 
