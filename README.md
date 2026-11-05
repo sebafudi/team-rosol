@@ -26,9 +26,9 @@ The YARD level, recorded from the desktop build with live Grok calls. Each line 
 | --- | --- | --- |
 | ![Prompt box](docs/demo/prompt.png) | ![Planks over lava](docs/demo/planks.png) | ![You made it](docs/demo/cleared.png) |
 
-[`chris_demo.mp4`](chris_demo.mp4)
+[![chris_demo on Vimeo](https://i.vimeocdn.com/video/2222553490-8cb227cb24bd18ac0985f716a84d0daba7f01ce44ab42d8017d48eff83dd8d22-d_960)](https://vimeo.com/1243897585)
 
-[`desktop_demo.mp4`](docs/demo/desktop_demo.mp4)
+[![Desktop demo on Vimeo](https://i.vimeocdn.com/video/2222553099-f068ec8363781f0b0e11f7e4c1b0095350cf2ea47566de77f8c0ee869b686c3d-d_960)](https://vimeo.com/1243897137)
 
 ## How a level plays
 
