@@ -187,11 +187,20 @@ async def run() -> None:
         audio.stop()
         pygame.quit()
         return
-    from tilebase.demo import world as demo_world
+    from tilebase.agent import AgentMiss, Placed, ask
+    from tilebase.box import draw_marks, open_level, overlaps_exit, place_box, render_map
+    from tilebase.edit import EditSuccess
 
-    font = None
-    world = demo_world()
-    start = Vec2(TILE * 2, world.rows * TILE - TILE - 22)
+    level = open_level()
+    world = level.world
+    entities = level.entities
+    start = level.spawn
+    prompt = ""
+    asking = False
+    notice = "enter  ask for the box"
+    edited = False
+    cleared = False
+    font = pygame.font.Font(None, 22)
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
@@ -216,9 +225,39 @@ async def run() -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and asking:
+                if event.key == pygame.K_ESCAPE:
+                    asking = False
+                elif event.key == pygame.K_RETURN:
+                    text = prompt.strip()
+                    prompt = ""
+                    asking = False
+                    if text:
+                        notice = "placing the box"
+                        _bar(screen, font, notice)
+                        pygame.display.flip()
+                        result = ask(text, render_map(world, entities, p.body.rect))
+                        if isinstance(result, Placed):
+                            edit = place_box(world, entities, result.col, result.row)
+                            if isinstance(edit, EditSuccess):
+                                world = edit.world
+                                entities = edit.entities
+                                edited = True
+                                notice = f"box at {result.col},{result.row}"
+                            else:
+                                notice = type(edit).__name__
+                        elif isinstance(result, AgentMiss):
+                            notice = result.message
+                elif event.key == pygame.K_BACKSPACE:
+                    prompt = prompt[:-1]
+                elif event.unicode.isprintable() and len(prompt) < 48:
+                    prompt += event.unicode
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_RETURN:
+                    asking = True
+                    prompt = ""
                 elif event.key == pygame.K_r:
                     p = player.spawn(start.x, start.y)
                     prev_rect = p.body.rect
@@ -242,6 +281,9 @@ async def run() -> None:
         frame_dt = now - last
         last = now
         held = read_held(pygame, pygame.key.get_pressed(), pad)
+        if asking:
+            held = Held(False, False, False, False, False, False)
+            latch = Latch()
         ix = axis(held.left, held.right)
         iy = axis(held.up, held.down)
 
@@ -279,6 +321,8 @@ async def run() -> None:
                 shake = max(shake, 0.2)
                 p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
+            elif edited and overlaps_exit(p.body.rect, entities):
+                cleared = True
 
         alpha = 0.0 if freeze > 0 else acc / TICK
         draw_x = lerp(prev_rect.x, p.body.rect.x, alpha)
@@ -308,20 +352,22 @@ async def run() -> None:
             look,
             dashes_left=p.dashes_left,
         )
+        draw_marks(screen, origin, entities)
+        if cleared:
+            line = "you made it"
+        elif asking:
+            line = "> " + prompt + "_"
+        else:
+            line = notice
+        _bar(screen, font, line)
         if show_debug:
-            if font is None:
-                try:
-                    font = pygame.font.Font(None, 16)
-                except (NotImplementedError, pygame.error):
-                    font = False
-            if font:
-                lines = (
-                    f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
-                    f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
-                    f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
-                )
-                for i, line in enumerate(lines):
-                    screen.blit(font.render(line, True, (20, 20, 20)), (6, 6 + i * 14))
+            lines = (
+                f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
+                f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
+                f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
+            )
+            for i, row in enumerate(lines):
+                screen.blit(font.render(row, True, (20, 20, 20)), (6, 6 + i * 14))
         pygame.display.flip()
         if WEB:
             clock.tick(60)
@@ -330,6 +376,13 @@ async def run() -> None:
         await asyncio.sleep(0)
     audio.stop()
     pygame.quit()
+
+
+def _bar(screen: object, font: object, line: str) -> None:
+    import pygame
+
+    pygame.draw.rect(screen, (236, 224, 196), (0, 332, 640, 28))
+    screen.blit(font.render(line, True, (28, 24, 22)), (8, 336))
 
 
 def _has_vsync(pygame: object) -> bool:
