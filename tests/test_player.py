@@ -224,5 +224,76 @@ class ForgivenessTest(unittest.TestCase):
         self.assertTrue(p.on_ground)
 
 
+WELL = (
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "..........#",
+    "###########",
+)
+WALL_X = 10 * TILE
+
+
+def _falling_by_wall(world: World, ticks: int = 30) -> Player:
+    t = Tuning()
+    p = spawn(WALL_X - t.width, TILE)
+    return _run(p, world, _inp(x=1), ticks)
+
+
+class WallTest(unittest.TestCase):
+    def test_wall_slide_caps_fall_speed(self) -> None:
+        world = _world(*WELL)
+        p = _falling_by_wall(world, ticks=60)
+        self.assertEqual(p.wall_dir, 1)
+        self.assertTrue(p.wall_sliding)
+        self.assertAlmostEqual(p.vel.y, 80.0)
+
+    def test_no_slide_without_holding_toward_wall(self) -> None:
+        world = _world(*WELL)
+        t = Tuning()
+        p = _run(spawn(WALL_X - t.width, TILE), world, IDLE, 40)
+        self.assertEqual(p.wall_dir, 1)
+        self.assertFalse(p.wall_sliding)
+        self.assertGreater(p.vel.y, 400.0)
+
+    def test_wall_jump_pushes_away_and_locks_input(self) -> None:
+        world = _world(*WELL)
+        p = _falling_by_wall(world)
+        p = step(p, _inp(x=1, jump=True, jump_pressed=True), world, _blocks, DT)
+        self.assertIn("wall_jump", p.events)
+        self.assertEqual(p.facing, -1)
+        self.assertLess(p.vel.y, -400.0)
+        self.assertLess(p.vel.x, -400.0)
+        p = _run(p, world, _inp(x=1, jump=True), 12)
+        self.assertLess(p.vel.x, -300.0, "toward-wall input is ignored during lock")
+        self.assertLess(p.body.rect.x + p.body.rect.w, WALL_X - 40)
+
+    def test_wall_jump_from_a_few_pixels_away(self) -> None:
+        world = _world(*WELL)
+        t = Tuning()
+        p = _run(spawn(WALL_X - t.width - 10, TILE), world, IDLE, 20)
+        self.assertEqual(p.wall_dir, 0)
+        p = step(p, _inp(jump=True, jump_pressed=True), world, _blocks, DT)
+        self.assertIn("wall_jump", p.events)
+        self.assertLess(p.vel.x, 0.0)
+
+    def test_no_wall_jump_far_from_wall(self) -> None:
+        world = _world(*WELL)
+        t = Tuning()
+        p = _run(spawn(WALL_X - t.width - 20, TILE), world, IDLE, 20)
+        p = step(p, _inp(jump=True, jump_pressed=True), world, _blocks, DT)
+        self.assertNotIn("wall_jump", p.events)
+
+
 if __name__ == "__main__":
     unittest.main()
