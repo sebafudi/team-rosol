@@ -26,7 +26,7 @@ The YARD level, recorded from the desktop build with live Grok calls. Each line 
 | --- | --- | --- |
 | ![Prompt box](docs/demo/prompt.png) | ![Planks over lava](docs/demo/planks.png) | ![You made it](docs/demo/cleared.png) |
 
-[`chris_demo.mp4`](chris_demo.mp4)
+[![Chris demo](https://img.youtube.com/vi/cwMLeEJvMvo/hqdefault.jpg)](https://youtu.be/cwMLeEJvMvo)
 
 ## How a level plays
 
