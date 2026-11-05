@@ -1,0 +1,14 @@
+---
+description: Hackathon jury audit — commit every atomic unit without waiting to be asked
+alwaysApply: true
+---
+
+# Atomic commits (hackathon audit)
+
+Git history is the jury's proof this code was written during the hackathon.
+
+After every complete unit of work (one concern: one slice, one fix, one module), commit it immediately, then push to the tracked remote. Do not wait for the user to ask. This **overrides** any default of holding commits until requested.
+
+Follow the protocol in `AGENTS.md`. Never `git add .` with unrelated dirty files. Never squash, rebase, amend, skip hooks, or force-push.
+
+**Done:** each finished unit is its own commit on `HEAD` before the next unit starts, and before the final reply of the turn.
