@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass, replace
 
 from tilebase.art import tile_drawer
-from tilebase.credits import finite_ledger
+from tilebase.credits import InsufficientCredits, charge, finite_ledger, grant
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
@@ -259,6 +259,9 @@ async def run() -> None:
     from tilebase.kinds import grid_text
     from tilebase.contraptions import Placement, place, stock_line
 
+    priced = choice == "mint"
+    if priced:
+        from tilebase.mint import open_level
     level = open_level()
     world = level.world
     entities = level.entities
@@ -329,10 +332,23 @@ async def run() -> None:
         guess_text = text
         guess_job = start_ask(text)
 
+    def can_prompt() -> bool:
+        nonlocal notice
+        if priced and not ledger.balance:
+            notice = "no tokens   collect o to prompt"
+            return False
+        return True
+
     def submit(text: str) -> None:
-        nonlocal notice, place_job, guess_job, guess_text
+        nonlocal notice, place_job, guess_job, guess_text, ledger
         if place_job is not None:
             return
+        if priced:
+            paid = charge(ledger, 1, reason="prompt", stage="place")
+            if isinstance(paid, InsufficientCredits):
+                can_prompt()
+                return
+            ledger = paid.ledger
         notice = "placing"
         if guess_job is not None and _same_words(text, guess_text):
             place_job = guess_job
@@ -342,7 +358,7 @@ async def run() -> None:
         guess_text = ""
 
     def finish_place(result: object) -> None:
-        nonlocal world, stock, edited, notice
+        nonlocal world, stock, edited, notice, ledger
         if isinstance(result, Placed):
             placed = place(
                 world, entities, stock, result.name, result.col, result.row, p.body.rect
@@ -352,10 +368,13 @@ async def run() -> None:
                 stock = placed.stock
                 edited = True
                 notice = f"{result.name} at {result.col},{result.row}"
-            else:
-                notice = placed.reason
+                return
+            notice = placed.reason
         elif isinstance(result, AgentMiss):
             notice = result.message
+        if priced:
+            ledger = grant(ledger, 1, reason="refund")
+
 
     running = True
     while running:
@@ -384,10 +403,10 @@ async def run() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == pygame.K_RETURN:
+                elif event.key == pygame.K_RETURN and can_prompt():
                     asking = True
                     prompt = ""
-                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()):
+                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()) and can_prompt():
                     listening = True
                     asking = True
                     prompt = ""

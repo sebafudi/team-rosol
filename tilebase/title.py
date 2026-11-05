@@ -71,6 +71,7 @@ _PROMPT = "> YOU JUMP"
 LEVELS = (
     ("yard", "YARD"),
     ("lifts", "LIFTS"),
+    ("mint", "MINT"),
 )
 
 

@@ -27,7 +27,7 @@ LEGEND = (
     "# stone solid, - wooden bridge solid, = gold platform you can jump up through, "
     "b crate solid, D door solid, ^ spikes kill, ~ ice solid and slippery, "
     "* red spring solid and bounces you high, L lava kills on touch, "
-    "c cracked rock solid until you stand on it, E exit flag, . air, P player"
+    "c cracked rock solid until you stand on it, E exit flag, o token coin (pickup, not solid), . air, P player"
 )
 
 
@@ -105,7 +105,7 @@ TILES: tuple[TileDef, ...] = (
     define("E", id="exit", draw=tile_drawer("exit"), marks=frozenset({"goal"})),
 )
 
-_GLYPH = {tile.id: tile.ch for tile in TILES}
+_GLYPH = {**{tile.id: tile.ch for tile in TILES}, "token": "o"}
 
 
 def level_tiles() -> tuple[TileDef, ...]:
