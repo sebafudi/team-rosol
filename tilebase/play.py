@@ -199,7 +199,7 @@ async def run() -> None:
         return
     from tilebase.agent import AgentMiss, Placed, ask
     from tilebase.speech import ListenError, Transcript
-    from tilebase.box import draw_marks, open_level, overlaps_exit, place_box, render_map
+    from tilebase.box import draw_marks, level_surface, open_level, overlaps_exit, place_box
     from tilebase.edit import EditSuccess
 
     level = open_level()
@@ -247,11 +247,18 @@ async def run() -> None:
 
     def submit(text: str) -> None:
         nonlocal world, entities, edited, notice
-        frame = _frame_png(screen)
+        center = Vec2(
+            p.body.rect.x + p.body.rect.w / 2,
+            p.body.rect.y + p.body.rect.h / 2,
+        )
+        sheet = level_surface(
+            world, entities, center, p, look, p.dashes_left
+        )
+        frame = _frame_png(sheet)
         notice = "placing the box"
         _bar(screen, notice)
         pygame.display.flip()
-        result = ask(text, render_map(world, entities, p.body.rect), frame)
+        result = ask(text, frame)
         if isinstance(result, Placed):
             edit = place_box(world, entities, result.col, result.row)
             if isinstance(edit, EditSuccess):

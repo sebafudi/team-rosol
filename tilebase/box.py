@@ -14,8 +14,8 @@ from tilebase.edit import (
     find_entity,
 )
 from tilebase.edit_integration import tile_rects
-from tilebase.geom import Rect, Vec2
-from tilebase.tiles import World, define, load_map
+from tilebase.geom import Rect, Size, Vec2
+from tilebase.tiles import World, cells_overlapping, define, load_map
 
 TILE = 32
 SPAN = 2
@@ -94,26 +94,30 @@ def place_box(world: World, entities: Entities, col: int, row: int) -> EditResul
     )
 
 
-def render_map(world: World, entities: Entities, player: Vec2) -> str:
-    """The grid the model sees. `#` solid, `B` the box, `E` the exit, `P` the player."""
-    rows = [["." for _ in range(world.cols)] for _ in range(world.rows)]
-    span = Rect(0, 0, world.cols * TILE, world.rows * TILE)
-    from tilebase.tiles import cells_overlapping
+def level_surface(
+    world: World,
+    entities: Entities,
+    center: Vec2,
+    player: object,
+    look: object,
+    dashes_left: int,
+) -> object:
+    """The whole level, one pixel per game pixel, with the player, box, and exit."""
+    import pygame
 
-    for cell in cells_overlapping(world, span):
-        if "blocks" in cell.marks:
-            rows[cell.row][cell.col] = "#"
-    for col, row in entities.exit_tiles:
-        rows[row][col] = "E"
-    box = find_entity(entities, BOX_ID)
-    if box is not None:
-        for col, row in box.tiles:
-            rows[row][col] = "B"
-    prow = int(player.y // TILE)
-    pcol = int(player.x // TILE)
-    if 0 <= prow < world.rows and 0 <= pcol < world.cols and rows[prow][pcol] == ".":
-        rows[prow][pcol] = "P"
-    return "\n".join("".join(row) for row in rows)
+    from tilebase import art
+
+    width = world.cols * TILE
+    height = world.rows * TILE
+    surface = pygame.Surface((width, height))
+    extent = Size(width, height)
+    art.draw_backdrop(surface, Vec2(width / 2, height / 2), extent, extent)
+    for cell in cells_overlapping(world, Rect(0, 0, width, height)):
+        rect = cell.rect
+        cell.draw(surface, Rect(rect.x, rect.y, rect.w, rect.h))
+    art.draw_player(surface, center, player, look, dashes_left=dashes_left)
+    draw_marks(surface, Vec2(0, 0), entities)
+    return surface
 
 
 def overlaps_exit(body: Rect, entities: Entities) -> bool:

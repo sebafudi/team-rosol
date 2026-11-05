@@ -12,15 +12,15 @@ from pathlib import Path
 MODEL = "x-ai/grok-4.7"
 
 SYSTEM = (
-    "You place one box on a tile map. The box is 64 by 64 pixels, "
-    "which is 2 tiles by 2 tiles. Tiles are 32 pixels. "
+    "You place one box on the level in the image. "
+    "The image is the entire level, top-left corner first. "
+    "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
     "You have one tool, place_box. col and row are the top-left tile. "
-    "Rows grow downward. # is solid, . is air, P is the player, E is the exit, "
-    "B is the box if it is already placed. "
-    "The floor gap is the dots on the bottom row, columns 4 through 11. "
-    "Call place_box with row 7 and col 6, 7, or 8, so air remains on both sides of the box. "
-    "The image is the screen the player sees right now, before you place anything. "
-    "Do not cover P or E. Call the tool once."
+    "Rows grow downward. "
+    "Stone tiles are solid. The orange square is the box if it is already placed. "
+    "The green tile is the exit. The character is the player. "
+    "Do not cover the player or the exit. "
+    "Call place_box once so the player can cross the gap in the floor."
 )
 
 
@@ -52,8 +52,8 @@ def api_key() -> str | None:
     return None
 
 
-def ask(prompt: str, grid: str, frame_png: bytes) -> Placed | AgentMiss:
-    """Send the player's sentence, the grid, and a PNG of the screen. Return the tool's tile."""
+def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
+    """Send the player's sentence and a PNG of the whole level. Return the tool's tile."""
     key = api_key()
     if key is None:
         return AgentMiss("OPENROUTER_API_KEY is missing")
@@ -66,12 +66,12 @@ def ask(prompt: str, grid: str, frame_png: bytes) -> Placed | AgentMiss:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"{grid}\n\nPlayer: {prompt}"},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {
                             "url": "data:image/png;base64,"
-                            + base64.b64encode(frame_png).decode()
+                            + base64.b64encode(level_png).decode()
                         },
                     },
                 ],
