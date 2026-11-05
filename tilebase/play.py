@@ -392,6 +392,15 @@ async def run() -> None:
                     asking = False
                     if mic is not None and not mic.done():
                         mic.cancel()
+                elif event.key == pygame.K_RETURN:
+                    listening = False
+                    asking = False
+                    if mic is not None and not mic.done():
+                        mic.cancel()
+                    text = prompt.strip()
+                    prompt = ""
+                    if text:
+                        submit(text)
             elif event.type == pygame.KEYDOWN and asking:
                 if event.key == pygame.K_ESCAPE:
                     asking = False
