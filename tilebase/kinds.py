@@ -27,7 +27,7 @@ LEGEND = (
     "# stone solid, - wooden bridge solid, = gold platform you can jump up through, "
     "b crate solid, D door solid, ^ spikes kill, ~ ice solid and slippery, "
     "* red spring solid and bounces you high, L lava kills on touch, "
-    "c cracked rock solid until you stand on it, E exit flag, . air, P player"
+    "c cracked rock solid until you stand on it, E exit flag, . air, P player, B the box"
 )
 
 
@@ -145,33 +145,3 @@ def hurt_at(world: World, rect: Rect) -> bool:
         if rect.y + rect.h > tip and rect.y < cell.rect.y + cell.rect.h:
             return True
     return False
-
-
-def grid_text(world: World, player: Rect) -> str:
-    """The level as glyph rows under a column ruler, then every named tile run with its coordinates.
-
-    The model miscounts columns in a 30-wide row, so runs like `lava: row 8, cols 9-14` are spelled out."""
-    everything = Rect(0, 0, world.cols * world.tile_size, world.rows * world.tile_size)
-    cells = {(c.col, c.row): c for c in cells_overlapping(world, everything)}
-    glyphs = {pos: glyph_for(c.id) for pos, c in cells.items()}
-    for c in cells_overlapping(world, player):
-        glyphs[(c.col, c.row)] = "P"
-    tens = "".join(str(col // 10 % 10) for col in range(world.cols))
-    ones = "".join(str(col % 10) for col in range(world.cols))
-    lines = [f"col  {tens}", f"     {ones}"]
-    for row in range(world.rows):
-        lines.append(f"row{row} " + "".join(glyphs[(col, row)] for col in range(world.cols)))
-    lines.append("")
-    for row in range(world.rows):
-        col = 0
-        while col < world.cols:
-            glyph = glyphs[(col, row)]
-            end = col
-            while end + 1 < world.cols and glyphs[(end + 1, row)] == glyph:
-                end += 1
-            if glyph not in (".", "#"):
-                name = "player" if glyph == "P" else cells[(col, row)].id
-                span = f"col {col}" if end == col else f"cols {col}-{end}"
-                lines.append(f"{name}: row {row}, {span}")
-            col = end + 1
-    return "\n".join(lines)
