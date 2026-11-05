@@ -43,7 +43,7 @@ SANDBOX = (
     "#.............................#.#.....##.......#.............#",
     "#######....####...######......#.#.....##..#######..###########",
     "#######....####...######......#.#.....##..#######..###########",
-    "##############################################################",
+    "#######....###################################################",
 )
 
 
@@ -168,6 +168,7 @@ async def run() -> None:
     import pygame
 
     from tilebase import art, blob, player
+    from tilebase.audio import Audio
 
     os.environ.setdefault("SDL_HINT_RENDER_VSYNC", "1")
     pygame.init()
@@ -178,9 +179,12 @@ async def run() -> None:
             (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
         )
     pygame.display.set_caption("Grok the Gap")
+    audio = Audio()
+    audio.start()
     from tilebase.title import show
 
     if await show(screen) != "play":
+        audio.stop()
         pygame.quit()
         return
     from tilebase.demo import world as demo_world
@@ -220,6 +224,8 @@ async def run() -> None:
                     prev_rect = p.body.rect
                 elif event.key == pygame.K_F1:
                     show_debug = not show_debug
+                elif event.key == pygame.K_m:
+                    audio.toggle_music()
                 if event.key in jump_codes:
                     latch = Latch(jump=True, dash=latch.dash)
                 if event.key in dash_codes:
@@ -256,6 +262,7 @@ async def run() -> None:
             prev_rect = p.body.rect
             p = player.step(p, inp, world, blocks, TICK)
             tick_no += 1
+            audio.play_events(p.events, p.impact)
             look = blob.update_look(look, p, ix, iy, TICK)
             feet = Vec2(p.body.rect.center.x, p.body.rect.y + p.body.rect.h)
             puffs = blob.emit_puffs(puffs, p, feet, tick_no)
@@ -266,7 +273,10 @@ async def run() -> None:
                 break
             if "land" in p.events and p.impact > 800:
                 shake = max(shake, 0.06)
+            # Below the map is a kill plane: the death sound, then respawn.
             if p.body.rect.y > world.rows * TILE + 64:
+                audio.play("death")
+                shake = max(shake, 0.2)
                 p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
 
@@ -300,20 +310,25 @@ async def run() -> None:
         )
         if show_debug:
             if font is None:
-                font = pygame.font.Font(None, 16)
-            lines = (
-                f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
-                f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
-                f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
-            )
-            for i, line in enumerate(lines):
-                screen.blit(font.render(line, True, (20, 20, 20)), (6, 6 + i * 14))
+                try:
+                    font = pygame.font.Font(None, 16)
+                except (NotImplementedError, pygame.error):
+                    font = False
+            if font:
+                lines = (
+                    f"fps {clock.get_fps():5.1f}  vel {p.vel.x:6.0f},{p.vel.y:6.0f}",
+                    f"ground {p.on_ground} wall {p.wall_dir} slide {p.wall_sliding}",
+                    f"dash {p.dashing} left {p.dashes_left}  {sorted(p.events)}",
+                )
+                for i, line in enumerate(lines):
+                    screen.blit(font.render(line, True, (20, 20, 20)), (6, 6 + i * 14))
         pygame.display.flip()
         if WEB:
             clock.tick(60)
         else:
             clock.tick(0 if _has_vsync(pygame) else 240)
         await asyncio.sleep(0)
+    audio.stop()
     pygame.quit()
 
 
