@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,7 +64,7 @@ def play_layout(width: int, height: int, time: float) -> TitleLayout:
     return TitleLayout(wordmark=word, subtitle=subtitle, mascot=mascot, button=button)
 
 
-def show(screen, *, max_frames: int | None = None) -> str:
+async def show(screen, *, max_frames: int | None = None) -> str:
     import pygame
 
     from tilebase.png import PngError, load_png
@@ -94,6 +95,7 @@ def show(screen, *, max_frames: int | None = None) -> str:
         pygame.display.flip()
         time += clock.tick(60) / 1000.0
         drawn += 1
+        await asyncio.sleep(0)
     return "quit"
 
 

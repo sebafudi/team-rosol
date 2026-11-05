@@ -76,6 +76,8 @@ def world() -> World:
 
 
 def main() -> None:
+    import asyncio
+
     import pygame
 
     from tilebase.loop import open_fullscreen
@@ -83,7 +85,7 @@ def main() -> None:
 
     screen, canvas, fitted = open_fullscreen(SCREEN)
     pygame.display.set_caption("Grok the Gap")
-    if show(screen) != "play":
+    if asyncio.run(show(screen)) != "play":
         pygame.quit()
         return
     run(

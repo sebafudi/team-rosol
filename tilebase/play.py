@@ -10,7 +10,9 @@ physics runs at 120 Hz, and the frame is drawn straight after the last tick.
 
 from __future__ import annotations
 
+import asyncio
 import math
+import sys
 from dataclasses import dataclass
 
 from tilebase.art import tile_drawer
@@ -22,6 +24,7 @@ TILE = 32
 VIEW = Size(640, 360)
 WINDOW_SCALE = 2
 TICK = 1.0 / 120.0
+WEB = sys.platform == "emscripten"
 MAX_TICKS_PER_FRAME = 8
 DASH_FREEZE = 0.05
 
@@ -155,6 +158,11 @@ def read_held(pygame: object, pressed: object, pad: object | None) -> Held:
 
 
 def main() -> None:
+    asyncio.run(run())
+
+
+async def run() -> None:
+    """The game loop yields each frame so the browser build can draw."""
     import os
 
     import pygame
@@ -164,15 +172,18 @@ def main() -> None:
 
     os.environ.setdefault("SDL_HINT_RENDER_VSYNC", "1")
     pygame.init()
-    screen = pygame.display.set_mode(
-        (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
-    )
+    if WEB:
+        screen = pygame.display.set_mode((VIEW.w, VIEW.h))
+    else:
+        screen = pygame.display.set_mode(
+            (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
+        )
     pygame.display.set_caption("Grok the Gap")
     audio = Audio()
     audio.start()
     from tilebase.title import show
 
-    if show(screen) != "play":
+    if await show(screen) != "play":
         audio.stop()
         pygame.quit()
         return
@@ -312,7 +323,11 @@ def main() -> None:
                 for i, line in enumerate(lines):
                     screen.blit(font.render(line, True, (20, 20, 20)), (6, 6 + i * 14))
         pygame.display.flip()
-        clock.tick(0 if _has_vsync(pygame) else 240)
+        if WEB:
+            clock.tick(60)
+        else:
+            clock.tick(0 if _has_vsync(pygame) else 240)
+        await asyncio.sleep(0)
     audio.stop()
     pygame.quit()
 
