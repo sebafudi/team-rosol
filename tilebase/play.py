@@ -20,7 +20,7 @@ from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.move import Body
 from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
-from tilebase.tokens import collect, draw_balance
+from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
 VIEW = Size(640, 360)
@@ -203,6 +203,7 @@ async def run() -> None:
     world = demo_world()
     # Collected tokens fill the balance a voice edit will spend later.
     ledger = finite_ledger(0)
+    counter = CounterLook()
     start = Vec2(TILE * 2, world.rows * TILE - TILE - 22)
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
@@ -323,7 +324,8 @@ async def run() -> None:
             look,
             dashes_left=p.dashes_left,
         )
-        draw_balance(screen, ledger.balance, VIEW.w)
+        counter = counter_step(counter, ledger.balance, frame_dt)
+        draw_balance(screen, ledger.balance, VIEW.w, counter)
         if show_debug:
             if font is None:
                 try:
