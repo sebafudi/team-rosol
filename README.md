@@ -67,6 +67,8 @@ The window is fullscreen. The camera is framed at 320 by 180 and scaled in whole
 python -m tilebase.play
 ```
 
-Arrows/WASD move, Space/C/Z jump (hold for height), X/Shift dash in 8 directions, R respawn, F1 debug overlay. Gamepad works too (A jump, B/X dash).
+Arrows/WASD move, Space/C/Z jump (hold for height), X/Shift dash in 8 directions, R respawn, M mutes the music, F1 debug overlay. Gamepad works too (A jump, B/X dash).
+
+Jumping, wall jumping, dashing, landing, hitting a ceiling, and falling out of the map each play a sound, and a short tune loops underneath. The left pit is open through the floor.
 
 `tilebase/player.py` is the pure controller: run/accel, variable jump with apex hang, coyote time, jump buffering, wall slide and wall jump, one dash charge refilled on landing. Because the hero is a ball, its corners are forgiving: it slips around ceiling corners, pops over low lips, and rolls off a ledge it barely stands on. `tilebase/blob.py` animates the hero: squash and stretch, a roll angle that follows distance travelled and rocks back eyes-up when the ball stops, and dust puffs. `tilebase/art.py` paints it with Nikolas's art from `assets/`: the Grok Bot ball (idle, jump and climb poses) spins as it rolls and turns blue when the dash is spent, tiles come from `assets/tiles/`, and `assets/bg.png` drifts behind the level as parallax. All movement numbers live in `player.Tuning`.
