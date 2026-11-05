@@ -7,9 +7,10 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame
 
 from tilebase.demo import blocks, draw_body, plan_move, world
-from tilebase.geom import Rect, Size
+from tilebase.geom import Rect, Size, Vec2
 from tilebase.loop import read_keys, run
 from tilebase.move import Body, Frame, Keys
+from tilebase.tiles import cell_at
 
 
 class LoopTest(unittest.TestCase):
@@ -34,6 +35,12 @@ class LoopTest(unittest.TestCase):
             world=world(),
         )
         self.assertEqual(plan_move(frame), pygame_vec())
+
+    def test_demo_tiles_are_32_pixels(self) -> None:
+        level = world()
+        corner = cell_at(level, Vec2(0, 0))
+        assert corner is not None
+        self.assertEqual(corner.rect, Rect(0, 0, 32, 32))
 
     def test_run_draws_two_dummy_frames(self) -> None:
         body = run(
