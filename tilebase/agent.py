@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -161,20 +162,28 @@ def provider() -> Provider:
 
 
 _lock = threading.Lock()
-_idle: dict[str, list[http.client.HTTPSConnection]] = {}
+# (connection, when it went idle). Idle keep-alives die quietly at the far end,
+# and writing into a dead one stalls until the socket timeout, so old ones are dropped.
+_idle: dict[str, list[tuple[http.client.HTTPSConnection, float]]] = {}
+MAX_IDLE = 20.0
+TIMEOUT = 10.0
 
 
 def _take(host: str) -> http.client.HTTPSConnection:
+    now = time.monotonic()
     with _lock:
         pool = _idle.setdefault(host, [])
-        if pool:
-            return pool.pop()
-    return http.client.HTTPSConnection(host, timeout=45)
+        while pool:
+            conn, since = pool.pop()
+            if now - since <= MAX_IDLE:
+                return conn
+            conn.close()
+    return http.client.HTTPSConnection(host, timeout=TIMEOUT)
 
 
 def _give(host: str, conn: http.client.HTTPSConnection) -> None:
     with _lock:
-        _idle.setdefault(host, []).append(conn)
+        _idle.setdefault(host, []).append((conn, time.monotonic()))
 
 
 def _post(host: str, path: str, body: bytes, headers: dict) -> tuple[int, str]:

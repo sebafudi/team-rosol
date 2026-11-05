@@ -24,6 +24,8 @@ from tilebase.tiles import Cell, World, cells_overlapping, define, glyph_rows, l
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
+# Two 10 s socket attempts plus slack. Past this, "placing" gives up.
+PLACE_DEADLINE = 25.0
 VIEW = Size(640, 360)
 WINDOW_SCALE = 2
 TICK = 1.0 / 120.0
@@ -267,6 +269,7 @@ async def run() -> None:
     asking = False
     listening = False
     place_job: asyncio.Task[object] | None = None
+    place_started = 0.0
     # A call started on an interim transcript. If the final matches, it is used.
     guess_job: asyncio.Task[object] | None = None
     guess_text = ""
@@ -331,10 +334,11 @@ async def run() -> None:
         guess_job = start_ask(text)
 
     def submit(text: str) -> None:
-        nonlocal notice, place_job, guess_job, guess_text
+        nonlocal notice, place_job, guess_job, guess_text, place_started
         if place_job is not None:
             return
         notice = "placing"
+        place_started = pygame.time.get_ticks() / 1000.0
         if guess_job is not None and _same_words(text, guess_text):
             place_job = guess_job
         else:
@@ -433,9 +437,13 @@ async def run() -> None:
         frame_dt = now - last
         last = now
         if place_job is not None and place_job.done():
-            result = place_job.result()
+            job, place_job = place_job, None
+            error = job.exception()
+            finish_place(AgentMiss(f"model failed: {error}") if error else job.result())
+        elif place_job is not None and now - place_started > PLACE_DEADLINE:
+            # The thread keeps running, but its answer is dropped.
             place_job = None
-            finish_place(result)
+            notice = "model timed out"
         held = read_held(pygame, pygame.key.get_pressed(), pad)
         if asking or place_job is not None:
             held = Held(False, False, False, False, False, False)
