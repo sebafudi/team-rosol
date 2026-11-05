@@ -67,13 +67,8 @@ async def listen() -> AsyncIterator[Transcript | ListenError]:
     def on_audio(indata, frames, time, status) -> None:
         loop.call_soon_threadsafe(audio.put_nowait, bytes(indata))
 
-    headers = {"Authorization": f"Token {key}"}
-    try:
-        socket = await websockets.connect(LISTEN_URL, additional_headers=headers)
-    except Exception as error:
-        yield ListenError(str(error))
-        return
-
+    # The mic starts before the socket so words said while it connects are
+    # queued and sent, not lost.
     stream = sd.RawInputStream(
         samplerate=SAMPLE_RATE,
         channels=CHANNELS,
@@ -81,8 +76,14 @@ async def listen() -> AsyncIterator[Transcript | ListenError]:
         blocksize=FRAME_SAMPLES,
         callback=on_audio,
     )
-    async with socket:
-        with stream:
+    headers = {"Authorization": f"Token {key}"}
+    with stream:
+        try:
+            socket = await websockets.connect(LISTEN_URL, additional_headers=headers)
+        except Exception as error:
+            yield ListenError(str(error))
+            return
+        async with socket:
             send_task = asyncio.create_task(_send_audio(socket, audio))
             try:
                 async for event in _read_transcripts(socket):
