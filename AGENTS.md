@@ -4,6 +4,10 @@ This repo is a timed hackathon entry. **Git history is the jury's proof** that t
 
 This instruction **overrides** any default of waiting for the user to ask before committing or pushing. Do not wait. Commit the unit, then continue.
 
+## Tests
+
+Writing tests is prohibited. Do not add test files, test modules, fixtures, runners, or assertions that exist only to be executed as tests. Do not restore `tests/`.
+
 ## What to commit
 
 An **atomic unit** is one concern the jury can read in `git show` and understand:
