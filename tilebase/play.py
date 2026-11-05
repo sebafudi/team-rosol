@@ -172,9 +172,11 @@ def main() -> None:
     if show(screen) != "play":
         pygame.quit()
         return
+    from tilebase.demo import world as demo_world
+
     font = None
-    world = sandbox()
-    start = spawn_point(SANDBOX)
+    world = demo_world()
+    start = Vec2(TILE * 2, world.rows * TILE - TILE - 22)
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
