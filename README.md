@@ -10,7 +10,7 @@ Co-op here means **human + AI on the same map**, not online PvP.
 
 These three frames are the browser build of the current game (`scripts/build_web.sh --serve`, then http://localhost:8000). The same screens are what `python -m tilebase.play` opens on the desktop. The AI edit described further down is the goal. What launches today is this title screen and this map.
 
-![Title screen: Grok Bot, The Gap, Play](docs/screenshots/title.png)
+![Title screen on the painted hills](docs/screenshots/title.png)
 
 ![The ball on the left floor, with the gap in the middle](docs/screenshots/ground.png)
 
