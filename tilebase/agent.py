@@ -101,41 +101,53 @@ def provider() -> Provider:
 
 
 _lock = threading.Lock()
-_conns: dict[str, http.client.HTTPSConnection] = {}
+_idle: dict[str, list[http.client.HTTPSConnection]] = {}
+
+
+def _take(host: str) -> http.client.HTTPSConnection:
+    with _lock:
+        pool = _idle.setdefault(host, [])
+        if pool:
+            return pool.pop()
+    return http.client.HTTPSConnection(host, timeout=45)
+
+
+def _give(host: str, conn: http.client.HTTPSConnection) -> None:
+    with _lock:
+        _idle.setdefault(host, []).append(conn)
 
 
 def _post(host: str, path: str, body: bytes, headers: dict) -> tuple[int, str]:
-    """POST over a kept-alive connection so TLS is paid once, not per command."""
-    with _lock:
-        for attempt in (0, 1):
-            conn = _conns.get(host)
-            if conn is None:
-                conn = http.client.HTTPSConnection(host, timeout=45)
-                _conns[host] = conn
-            try:
-                conn.request("POST", path, body, headers)
-                response = conn.getresponse()
-                return response.status, response.read().decode()
-            except (http.client.HTTPException, OSError):
-                conn.close()
-                _conns.pop(host, None)
-                if attempt:
-                    raise
+    """POST over a kept-alive connection so TLS is paid once, not per command.
+
+    Connections are pooled so a speculative call and the real one can overlap.
+    """
+    for attempt in (0, 1):
+        conn = _take(host)
+        try:
+            conn.request("POST", path, body, headers)
+            response = conn.getresponse()
+            result = response.status, response.read().decode()
+        except (http.client.HTTPException, OSError):
+            conn.close()
+            if attempt:
+                raise
+            continue
+        _give(host, conn)
+        return result
     raise RuntimeError("unreachable")
 
 
 def warm() -> None:
     """Open the TLS connection ahead of the first command."""
-    chosen = provider()
-    with _lock:
-        if chosen.host in _conns:
-            return
-        conn = http.client.HTTPSConnection(chosen.host, timeout=45)
-        try:
-            conn.connect()
-        except OSError:
-            return
-        _conns[chosen.host] = conn
+    host = provider().host
+    conn = _take(host)
+    try:
+        conn.connect()
+    except OSError:
+        conn.close()
+        return
+    _give(host, conn)
 
 
 def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
