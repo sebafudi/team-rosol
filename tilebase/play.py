@@ -20,6 +20,7 @@ from tilebase.credits import InsufficientCredits, charge, finite_ledger, grant
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
+from tilebase.pause import draw_pause, pause_key
 from tilebase.tiles import Cell, World, cells_overlapping, define, glyph_rows, load_map, put_cell
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
@@ -229,7 +230,6 @@ async def run() -> None:
 
     import pygame
 
-    from tilebase import art, blob, player
     from tilebase.audio import Audio
 
     os.environ.setdefault("SDL_HINT_RENDER_VSYNC", "1")
@@ -245,18 +245,28 @@ async def run() -> None:
     audio.start()
     from tilebase.title import show
 
-    choice = await show(screen, picker=True)
-    if choice == "quit":
-        audio.stop()
-        pygame.quit()
-        return
-    if choice == "lifts":
-        from tilebase.city import run_level
+    # Each level returns "menu" to come back here, or "quit" to close the game.
+    while True:
+        choice = await show(screen, picker=True)
+        if choice == "quit":
+            break
+        if choice == "lifts":
+            from tilebase.city import run_level
 
-        await run_level(screen, audio)
-        audio.stop()
-        pygame.quit()
-        return
+            outcome = await run_level(screen, audio)
+        else:
+            outcome = await play_level(screen, audio, choice)
+        if outcome == "quit":
+            break
+    audio.stop()
+    pygame.quit()
+
+
+async def play_level(screen: object, audio: object, choice: str) -> str:
+    """Play the yard or the trial until Esc picks "menu" or "quit"."""
+    import pygame
+
+    from tilebase import art, blob, player
     from tilebase.agent import AgentMiss, Placed, ask, level_grid, warm
     from tilebase.speech import ListenError, Transcript
     from tilebase.box import level_surface, overlaps_exit
@@ -442,13 +452,27 @@ async def run() -> None:
         guess_text = ""
         p = player.spawn(start.x, start.y)
         prev_rect = p.body.rect
-        notice_set("restarted   " + level.hint)
+        notice_set(level.hint or "restarted")
 
+    paused = False
+    pause_pick = 0
+    outcome = "quit"
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif paused:
+                if event.type != pygame.KEYDOWN:
+                    continue
+                pause_pick, picked = pause_key(event.key, pause_pick)
+                if picked is not None:
+                    paused = False
+                if picked == "restart":
+                    restart()
+                elif picked in ("menu", "quit"):
+                    outcome = picked
+                    running = False
             elif (
                 event.type == pygame.KEYUP
                 and event.key == pygame.K_v
@@ -481,7 +505,8 @@ async def run() -> None:
                     prompt += event.unicode
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    paused = True
+                    pause_pick = 0
                 elif event.key == pygame.K_RETURN and can_prompt():
                     asking = True
                     prompt = ""
@@ -559,13 +584,15 @@ async def run() -> None:
             notice = "model timed out"
             refund()
         held = read_held(pygame, pygame.key.get_pressed(), pad)
-        if asking or place_job is not None:
+        if paused or asking or place_job is not None:
             held = Held(False, False, False, False, False, False)
             latch = Latch()
         ix = axis(held.left, held.right)
         iy = axis(held.up, held.down)
 
-        if freeze > 0:
+        if paused:
+            n = 0
+        elif freeze > 0:
             freeze -= frame_dt
             n = 0
         else:
@@ -666,6 +693,8 @@ async def run() -> None:
             )
             for i, row in enumerate(rows):
                 _ink(screen, row, 6, 6 + i * 10, scale=1)
+        if paused:
+            draw_pause(screen, pause_pick)
         pygame.display.flip()
         if WEB:
             clock.tick(60)
@@ -674,8 +703,7 @@ async def run() -> None:
         await asyncio.sleep(0)
     if mic is not None and not mic.done():
         mic.cancel()
-    audio.stop()
-    pygame.quit()
+    return outcome
 
 
 _GLYPHS = {
