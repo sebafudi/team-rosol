@@ -8,6 +8,10 @@ This instruction **overrides** any default of waiting for the user to ask before
 
 Writing tests is prohibited. Do not add test files, test modules, fixtures, runners, or assertions that exist only to be executed as tests. Do not restore `tests/`.
 
+## Web build
+
+The pygbag browser build (`main.py`, `scripts/build_web.sh`) is optional. Do not spend time keeping it working, and do not build or test it unless asked. The team revisits it right before the demo.
+
 ## What to commit
 
 An **atomic unit** is one concern the jury can read in `git show` and understand:

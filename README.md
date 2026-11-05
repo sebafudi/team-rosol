@@ -70,3 +70,14 @@ python -m tilebase.play
 Arrows/WASD move, Space/C/Z jump (hold for height), X/Shift dash in 8 directions, R respawn, F1 debug overlay. Gamepad works too (A jump, B/X dash).
 
 `tilebase/player.py` is the pure controller: run/accel, variable jump with apex hang, coyote time, jump buffering, wall slide and wall jump, one dash charge refilled on landing. Because the hero is a ball, its corners are forgiving: it slips around ceiling corners, pops over low lips, and rolls off a ledge it barely stands on. `tilebase/blob.py` animates the hero: squash and stretch, a roll angle that follows distance travelled and rocks back eyes-up when the ball stops, and dust puffs. `tilebase/art.py` paints it with Nikolas's art from `assets/`: the Grok Bot ball (idle, jump and climb poses) spins as it rolls and turns blue when the dash is spent, tiles come from `assets/tiles/`, and `assets/bg.png` drifts behind the level as parallax. All movement numbers live in `player.Tuning`.
+
+## Play in the browser (optional)
+
+The web build is optional and may lag behind the desktop game. Nobody keeps it working during development; we check it right before the demo.
+
+```bash
+pip install pygbag
+scripts/build_web.sh --serve   # then open http://localhost:8000
+```
+
+pygbag compiles nothing: it ships the Python sources with a WebAssembly CPython and pygame-ce. `main.py` is the browser entry point, and the game loops `await asyncio.sleep(0)` each frame so the page can draw. The script copies only `main.py`, `tilebase/` and `assets/` into the bundle, so `.env.local` never goes public. Speech input (`tilebase/speech.py`) is desktop-only for now. `scripts/build_web.sh` without `--serve` writes a static site to `build/grok-the-gap/build/web` for any static host.
