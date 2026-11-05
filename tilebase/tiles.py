@@ -192,3 +192,11 @@ def _cell(world: World, col: int, row: int) -> Cell:
         row=row,
         draw=tile.draw,
     )
+
+
+def glyph_rows(world: World) -> tuple[str, ...]:
+    """The world as map characters, one string per row, edits included."""
+    return tuple(
+        "".join(world._defs[world._index[row * world.cols + col]].ch for col in range(world.cols))
+        for row in range(world.rows)
+    )
