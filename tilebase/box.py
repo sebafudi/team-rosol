@@ -26,17 +26,19 @@ SPAN = 2
 BOX_ID = "box"
 
 # The pit is wider than a dash-jump. Spikes mark where the box belongs.
-# The shelf on the left stays over stone, short of the lip.
+# The shelf on the left stays over stone, short of the lip. The start floor is
+# ice, a spring sits at the lip, lava fills the pit's left half, and cracked
+# rock hangs over it: each kind is something a prompt can name.
 ROWS = (
     "##############################",
     "#............................#",
     "#............................#",
     "#............................#",
-    "#............................#",
+    "#..........ccc...............#",
     "#............................#",
     "#---==b....................EE#",
-    "#........................D.EE#",
-    "#########......^^.......######",
+    "#.......o................D.EE#",
+    "#~~~~~~~#LLLLLL^^.......######",
 )
 EXIT = frozenset({(27, 6), (28, 6), (27, 7), (28, 7)})
 

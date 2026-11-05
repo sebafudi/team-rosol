@@ -13,14 +13,14 @@ from __future__ import annotations
 import asyncio
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tilebase.art import tile_drawer
 from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
-from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark
+from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark, under_feet
 from tilebase.move import Body
-from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
+from tilebase.tiles import Cell, World, cells_overlapping, define, load_map, put_cell
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
@@ -101,6 +101,61 @@ def clamp_cam(center: Vec2, world: World, view: Size) -> Vec2:
 
 def blocks(cell: Cell, body: Body, delta: Vec2) -> bool:
     return blocks_cell(cell, body, delta)
+
+
+# A spring throws you about five tiles up.
+SPRING_SPEED = 1000.0
+# On ice the run input only moves this share of the way toward its speed each tick.
+ICE_GRIP = 0.15
+# Cracked rock holds this long under your feet, then falls away.
+CRUMBLE_DELAY = 0.4
+
+
+@dataclass(frozen=True)
+class Ground:
+    """Cracked rock being stood on (seconds so far) and rock already fallen."""
+
+    crumbling: tuple[tuple[tuple[int, int], float], ...] = ()
+    broken: tuple[tuple[int, int], ...] = ()
+
+
+def ground_effects(
+    p: player.Player, prev_vel: Vec2, world: World, ground: Ground, dt: float
+) -> tuple[player.Player, World, Ground]:
+    """Ice keeps speed, springs launch, cracked rock falls after a short stand."""
+    if not p.on_ground:
+        return p, world, Ground(broken=ground.broken)
+    cells = under_feet(world, p.body.rect)
+    if any("slick" in cell.marks for cell in cells):
+        vx = prev_vel.x + (p.vel.x - prev_vel.x) * ICE_GRIP
+        p = replace(p, vel=Vec2(vx, p.vel.y))
+    if any("bounce" in cell.marks for cell in cells):
+        p = replace(p, vel=Vec2(p.vel.x, -SPRING_SPEED), on_ground=False)
+    held = dict(ground.crumbling)
+    timers: list[tuple[tuple[int, int], float]] = []
+    broken = list(ground.broken)
+    for cell in cells:
+        if "crumble" not in cell.marks:
+            continue
+        key = (cell.col, cell.row)
+        t = held.get(key, 0.0) + dt
+        if t < CRUMBLE_DELAY:
+            timers.append((key, t))
+            continue
+        put = put_cell(world, cell.col, cell.row, "empty")
+        if isinstance(put, World):
+            world = put
+            broken.append(key)
+    return p, world, Ground(tuple(timers), tuple(broken))
+
+
+def mend(world: World, ground: Ground) -> World:
+    """Put fallen cracked rock back, as on a respawn."""
+    for col, row in ground.broken:
+        put = put_cell(world, col, row, "crumble")
+        if isinstance(put, World):
+            world = put
+    return world
 
 
 def spawn_point(rows: tuple[str, ...]) -> Vec2:
@@ -216,6 +271,7 @@ async def run() -> None:
     notice = "name a tile   enter   v talk"
     edited = False
     cleared = False
+    ground = Ground()
     ledger = finite_ledger(0)
     counter = CounterLook()
     jump_codes = _codes(pygame, JUMP_KEYS)
@@ -374,7 +430,9 @@ async def run() -> None:
             )
             latch = Latch()
             prev_rect = p.body.rect
+            prev_vel = p.vel
             p = player.step(p, inp, world, blocks, TICK)
+            p, world, ground = ground_effects(p, prev_vel, world, ground, TICK)
             tick_no += 1
             audio.play_events(p.events, p.impact)
             look = blob.update_look(look, p, ix, iy, TICK)
@@ -390,12 +448,14 @@ async def run() -> None:
                 break
             if "land" in p.events and p.impact > 800:
                 shake = max(shake, 0.06)
-            # Spikes kill on contact. Below the map is the same respawn.
+            # Spikes and lava kill on contact. Below the map is the same respawn.
             if hurt_at(world, p.body.rect) or p.body.rect.y > world.rows * TILE + 64:
                 audio.play("death")
                 shake = max(shake, 0.2)
                 p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
+                world = mend(world, ground)
+                ground = Ground()
             elif edited and (
                 overlaps_mark(world, p.body.rect, "goal")
                 or overlaps_exit(p.body.rect, entities)
