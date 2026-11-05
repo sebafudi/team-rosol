@@ -21,9 +21,10 @@ def load_png(path: Path):
     decoded = _rgba(data)
     if isinstance(decoded, PngError):
         return decoded
-    width, height, rows = decoded
+    width, height, color, rows = decoded
     payload = b"".join(rows)
-    image = pygame.image.frombuffer(payload, (width, height), "RGBA")
+    format_name = "RGBA" if color == 6 else "RGB"
+    image = pygame.image.frombuffer(payload, (width, height), format_name)
     if pygame.display.get_surface() is None:
         return image
     return image.convert_alpha()
@@ -47,9 +48,10 @@ def _rgba(data: bytes):
     if header is None:
         return PngError(reason="missing header")
     width, height, bit, color, comp, filt, inter = struct.unpack(">IIBBBBB", header)
-    if (bit, color, comp, filt, inter) != (8, 6, 0, 0, 0):
+    if (bit, comp, filt, inter) != (8, 0, 0, 0) or color not in (2, 6):
         return PngError(reason="unsupported png")
-    stride = width * 4
+    channels = 4 if color == 6 else 3
+    stride = width * channels
     inflated = zlib.decompress(bytes(idat))
     rows: list[bytes] = []
     index = 0
@@ -59,10 +61,10 @@ def _rgba(data: bytes):
         index += 1
         row = bytearray(inflated[index : index + stride])
         index += stride
-        _unfilter(filter_type, row, previous, 4)
+        _unfilter(filter_type, row, previous, channels)
         previous = row
         rows.append(bytes(row))
-    return width, height, rows
+    return width, height, color, rows
 
 
 def _unfilter(filter_type: int, row: bytearray, previous: bytearray, bpp: int) -> None:
