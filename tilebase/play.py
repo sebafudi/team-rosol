@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from tilebase.art import tile_drawer
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.move import Body
 from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
@@ -104,14 +105,6 @@ def spawn_point(rows: tuple[str, ...]) -> Vec2:
     return Vec2(TILE, TILE)
 
 
-def _draw_solid(screen: object, rect: Rect) -> None:
-    import pygame
-
-    r = pygame.Rect(round(rect.x), round(rect.y), round(rect.w), round(rect.h))
-    pygame.draw.rect(screen, (58, 44, 52), r)
-    pygame.draw.rect(screen, (92, 66, 72), r, 1)
-
-
 def _draw_empty(screen: object, rect: Rect) -> None:
     return None
 
@@ -121,7 +114,7 @@ def sandbox() -> World:
         tuple(row.replace("S", ".") for row in SANDBOX),
         (
             define(".", id="empty", draw=_draw_empty, marks=frozenset()),
-            define("#", id="solid", draw=_draw_solid, marks=frozenset({"blocks"})),
+            define("#", id="solid", draw=tile_drawer("solid"), marks=frozenset({"blocks"})),
         ),
         tile_size=TILE,
     )
@@ -166,7 +159,7 @@ def main() -> None:
 
     import pygame
 
-    from tilebase import blob, player
+    from tilebase import art, blob, player
 
     os.environ.setdefault("SDL_HINT_RENDER_VSYNC", "1")
     pygame.init()
@@ -272,15 +265,18 @@ def main() -> None:
         sy = math.cos(now * 77.0) * jitter
         origin = Vec2(round(cam.x - VIEW.w / 2 + sx), round(cam.y - VIEW.h / 2 + sy))
 
-        screen.fill((236, 120, 60))
+        art.draw_backdrop(
+            screen, cam, Size(world.cols * TILE, world.rows * TILE), VIEW
+        )
         view = Rect(origin.x, origin.y, VIEW.w, VIEW.h)
         for cell in cells_overlapping(world, view):
             r = cell.rect
             cell.draw(screen, Rect(r.x - origin.x, r.y - origin.y, r.w, r.h))
         blob.draw_puffs(screen, puffs, origin)
-        blob.draw_blob(
+        art.draw_player(
             screen,
             Vec2(center.x - origin.x, center.y - origin.y),
+            p,
             look,
             dashes_left=p.dashes_left,
         )
