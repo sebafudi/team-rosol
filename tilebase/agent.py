@@ -53,8 +53,52 @@ SYSTEM = (
     "Pick the contraption that fits what the player asks for and put it on the thing they name. "
     "The floor is the bottom row, so covering a floor tile uses the row above it. "
     "If they do not name a place or a contraption, cover the spikes with whatever fits. "
-    "Do not cover the player or the exit. Call the tool once."
+    "Do not cover the player or the exit. "
+    "The user message also has the level as a text grid with column numbers on top and row numbers on the left. "
+    "Below the grid is a list of landmarks with their columns and rows already counted. Take col and row from that list, not by measuring the image. "
+    "Grid key: . air, # stone, - wooden bridge, = gold platform, b crate, D door, ^ spikes, "
+    "~ ice, * spring, L lava, c cracked rock, E exit, P the player. "
+    "Call the tool once."
 )
+
+
+def level_grid(rows: tuple[str, ...], player: tuple[int, int] | None = None) -> str:
+    """Rows with a two-line column ruler and row numbers, P on the player's tile."""
+    width = len(rows[0]) if rows else 0
+    tens = "".join(str(c // 10) if c >= 10 else " " for c in range(width))
+    ones = "".join(str(c % 10) for c in range(width))
+    lines = [f"   {tens}", f"   {ones}"]
+    for r, row in enumerate(rows):
+        if player is not None and player[1] == r:
+            col = player[0]
+            row = row[:col] + "P" + row[col + 1 :]
+        lines.append(f"{r:>2} {row}")
+    return "\n".join(lines) + "\n\nLandmarks:\n" + landmarks(rows, player)
+
+
+_NAMES = {
+    "-": "wooden bridge", "=": "gold platform", "b": "crate", "D": "door", "^": "spikes",
+    "~": "ice", "*": "spring", "L": "lava", "c": "cracked rock", "E": "exit",
+}
+
+
+def landmarks(rows: tuple[str, ...], player: tuple[int, int] | None = None) -> str:
+    """Each horizontal run of a named tile, with its columns and row already counted."""
+    lines = []
+    for r, row in enumerate(rows):
+        c = 0
+        while c < len(row):
+            ch = row[c]
+            end = c
+            while end + 1 < len(row) and row[end + 1] == ch:
+                end += 1
+            if ch in _NAMES:
+                cols = f"col {c}" if c == end else f"cols {c}-{end}"
+                lines.append(f"- {_NAMES[ch]}: {cols}, row {r}")
+            c = end + 1
+    if player is not None:
+        lines.append(f"- player: col {player[0]}, row {player[1]}")
+    return "\n".join(lines)
 
 
 def tool(stock: Stock) -> dict:
@@ -166,8 +210,8 @@ def warm() -> None:
     _give(host, conn)
 
 
-def ask(prompt: str, level_png: bytes, stock: Stock) -> Placed | AgentMiss:
-    """Send a PNG of the whole level, the stock left, and the player's sentence."""
+def ask(prompt: str, level_png: bytes, stock: Stock, grid: str = "") -> Placed | AgentMiss:
+    """Send a PNG of the whole level, its text grid, the stock left, and the player's sentence."""
     if not stock:
         return AgentMiss("no contraptions left")
     chosen = provider()
@@ -185,7 +229,7 @@ def ask(prompt: str, level_png: bytes, stock: Stock) -> Placed | AgentMiss:
         # Image before text: the unchanged level is a cacheable prefix.
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": [image, {"type": "text", "text": f"Left: {describe(stock)}.\n{prompt}"}]},
+            {"role": "user", "content": [image, {"type": "text", "text": f"Level grid:\n{grid}\n\nLeft: {describe(stock)}.\n{prompt}"}]},
         ],
         "tools": [tool(stock)],
         "tool_choice": {"type": "function", "function": {"name": "place_contraption"}},
