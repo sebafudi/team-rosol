@@ -1,12 +1,10 @@
-"""Night-ruins example room. The default demo level is unchanged.
+"""Night-ruins chamber. The two crossing platforms start in the agent's pocket.
 
 Run with `python -m tilebase.city`.
 
-The room follows the cable-lift chamber: a snowy ledge on the left, stone
-arches, two ice masses, and a pair of lifts hanging in the center. Stand on
-a lift and it climbs to the ice beside it, pauses, then returns. From either
-ice shelf a jump reaches the sill under the crystal. The shaft below the
-floor is spikes.
+The room follows the cable-lift screen: a left arch, ice shelves, a spiked
+alcove with the flag, and a stone bridge broken in two places. Enter a
+prompt and the agent places the left or right platform from its pocket.
 """
 
 from __future__ import annotations
@@ -14,112 +12,122 @@ from __future__ import annotations
 import asyncio
 import math
 
-from tilebase.art import tile_drawer
+from tilebase.edit import Command, EditSuccess, Entities, apply_edit, define_entities, find_entity
 from tilebase.geom import Rect, Size, Vec2
-from tilebase.kinds import hurt_at, level_tiles
-from tilebase.movers import Mover, ride_step
+from tilebase.kinds import hurt_at, level_tiles, overlaps_mark
 from tilebase.play import (
     DASH_FREEZE,
     DASH_KEYS,
     JUMP_KEYS,
     TICK,
     WEB,
+    Ground,
+    Held,
     Latch,
     _codes,
+    _frame_png,
     axis,
     blocks,
     clamp_cam,
     follow,
+    ground_effects,
     lerp,
+    mend,
     read_held,
     ticks_for,
 )
-from tilebase.tiles import World, cells_overlapping, define, load_map
+from tilebase.tiles import World, cells_overlapping, load_map
 
 TILE = 32
 # The whole room fits the window, the way the reference chamber is one screen.
 VIEW = Size(30 * TILE, 17 * TILE)
 
+# Glyphs from kinds: # stone  ~ ice  ^ spikes  E flag  S spawn
+# Row 5 is the bridge, broken at columns 6 and 14. Each gap is one pocket platform.
 #          012345678901234567890123456789
 ROWS = (
     "..####......######..........#.",
-    "..#..#......#....#..........i.",
-    "..#..#......#....#..........i.",
-    "..#..#......#..o.#..........#.",
+    "..#..#......#^^^^#..........~.",
+    "..#..#......#....#..........~.",
+    "..#..#......#..E.#..........#.",
     "..####......................#.",
-    "....##....############......#.",
+    "....##....####....####......#.",
     "....##......................#.",
-    "....##iiii............iiii..#.",
-    "....##iiii............iiii..##",
-    "....##iiii............iiii....",
+    "....##~~~~............~~~~..#.",
+    "....##~~~~............~~~~..##",
+    "....##~~~~............~~~~....",
     "....##....................####",
     "...S..........................",
-    "iiisssss......................",
+    "~~~~~~~~......................",
     "########..............########",
     "..............................",
     "..............................",
     "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
 )
 
-# Sagging cables between the ice masses, in world pixels.
-CHAINS = (
-    ((10 * TILE, 8 * TILE + 8), (22 * TILE, 8 * TILE + 18), 28.0),
-    ((10 * TILE, 9 * TILE + 4), (22 * TILE, 9 * TILE + 10), 36.0),
-    ((6 * TILE, 7 * TILE), (14 * TILE, 5 * TILE + 20), 18.0),
-)
-
-
-def _draw_snow(screen: object, rect: Rect) -> None:
-    import pygame
-
-    tile_drawer("solid")(screen, rect)
-    pygame.draw.rect(screen, (248, 252, 255), (rect.x, rect.y, rect.w, 8))
-
-
-def _draw_ice(screen: object, rect: Rect) -> None:
-    import pygame
-
-    tile_drawer("solid")(screen, rect)
-    veil = pygame.Surface((max(1, round(rect.w)), max(1, round(rect.h))), pygame.SRCALPHA)
-    veil.fill((70, 160, 235, 130))
-    screen.blit(veil, (round(rect.x), round(rect.y)))
-
-
-def _draw_crystal(screen: object, rect: Rect) -> None:
-    import pygame
-
-    cx = round(rect.x + rect.w / 2)
-    cy = round(rect.y + rect.h / 2)
-    pygame.draw.circle(screen, (150, 190, 255), (cx, cy), 14)
-    pygame.draw.circle(screen, (210, 235, 255), (cx, cy), 8)
-    pygame.draw.circle(screen, (255, 255, 255), (cx - 2, cy - 3), 3)
+# The two platforms the agent is holding. Each covers four tiles.
+SLOTS = ("left", "right")
+SPAN = 4
 
 
 def world() -> World:
     rows = tuple(row.replace("S", ".") for row in ROWS)
-    loaded = load_map(
-        rows,
-        (
-            *level_tiles(),
-            define("s", id="snow", draw=_draw_snow, marks=frozenset({"blocks"})),
-            define("i", id="ice", draw=_draw_ice, marks=frozenset({"blocks"})),
-            define("o", id="crystal", draw=_draw_crystal, marks=frozenset({"goal"})),
-        ),
-        tile_size=TILE,
-    )
+    loaded = load_map(rows, level_tiles(), tile_size=TILE)
     if not isinstance(loaded, World):
         raise RuntimeError(loaded)
     return loaded
 
 
-def lifts() -> tuple[Mover, ...]:
-    """The two center platforms. Each docks level with the ice shelf beside it."""
-    top = 7 * TILE
-    home = 15 * TILE
-    return (
-        Mover("left", x=10 * TILE, y=home, w=4 * TILE, h=24, home=home, goal=top, pulley=6 * TILE + 14),
-        Mover("right", x=18 * TILE, y=home, w=4 * TILE, h=24, home=home, goal=top, pulley=6 * TILE + 20),
+def exit_tiles() -> frozenset[tuple[int, int]]:
+    found = {
+        (col, row)
+        for row, line in enumerate(ROWS)
+        for col, glyph in enumerate(line)
+        if glyph == "E"
+    }
+    return frozenset(found)
+
+
+def open_room() -> tuple[World, Entities, Vec2]:
+    """The chamber, with both platforms still in the pocket."""
+    level = world()
+    start = spawn_point()
+    _level, entities = define_entities(
+        level,
+        (),
+        bounds=Rect(0, 0, level.cols * TILE, level.rows * TILE),
+        exit_tiles=exit_tiles(),
+        spawn_rect=Rect(start.x, start.y, 22, 22),
     )
+    return level, entities, start
+
+
+def platform_tiles(col: int, row: int) -> tuple[tuple[int, int], ...]:
+    return tuple((col + dx, row) for dx in range(SPAN))
+
+
+def place_platform(world: World, entities: Entities, slot: str, col: int, row: int):
+    """Put one pocket platform. Placing the same slot again moves it."""
+    if slot not in SLOTS:
+        from tilebase.edit import InvalidOperation
+
+        return InvalidOperation(f"unknown platform {slot}")
+    tiles = platform_tiles(col, row)
+    current = find_entity(entities, slot)
+    if current is None:
+        return apply_edit(world, entities, Command(op="place", id=slot, tiles=tiles))
+    origin_col = min(c for c, _r in current.tiles)
+    origin_row = min(r for _c, r in current.tiles)
+    return apply_edit(
+        world,
+        entities,
+        Command(op="move", id=slot, by=(col - origin_col, row - origin_row)),
+    )
+
+
+def pocket_slots(entities: Entities) -> tuple[str, ...]:
+    """Platforms the agent is still holding."""
+    return tuple(slot for slot in SLOTS if find_entity(entities, slot) is None)
 
 
 def spawn_point(rows: tuple[str, ...] = ROWS) -> Vec2:
@@ -128,20 +136,6 @@ def spawn_point(rows: tuple[str, ...] = ROWS) -> Vec2:
         if c >= 0:
             return Vec2(c * TILE + (TILE - 22) / 2, r * TILE + TILE - 22)
     return Vec2(TILE, TILE)
-
-
-def reached_crystal(level: World, rect: Rect) -> bool:
-    return any(cell.id == "crystal" for cell in cells_overlapping(level, rect))
-
-
-def _chain(screen: object, origin: Vec2, a: tuple[float, float], b: tuple[float, float], sag: float) -> None:
-    import pygame
-
-    mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2 + sag)
-    points = tuple(
-        (round(p[0] - origin.x), round(p[1] - origin.y)) for p in (a, mid, b)
-    )
-    pygame.draw.lines(screen, (186, 198, 214), False, points, 2)
 
 
 def _sign(screen: object, origin: Vec2) -> None:
@@ -155,19 +149,6 @@ def _sign(screen: object, origin: Vec2) -> None:
     pygame.draw.line(screen, (64, 140, 72), (x + 22, y + 14), (x + 40, y + 20), 2)
 
 
-def _icicles(screen: object, origin: Vec2) -> None:
-    import pygame
-
-    for col in range(13, 17):
-        x = col * TILE + 10 - origin.x
-        y = TILE - origin.y
-        pygame.draw.polygon(
-            screen,
-            (236, 244, 255),
-            ((round(x), round(y)), (round(x + 8), round(y)), (round(x + 4), round(y + 14))),
-        )
-
-
 def _snow_cap(screen: object, origin: Vec2) -> None:
     import pygame
 
@@ -175,34 +156,52 @@ def _snow_cap(screen: object, origin: Vec2) -> None:
     pygame.draw.circle(screen, (186, 224, 255), (round(27 * TILE + 8 - origin.x), round(28 - origin.y)), 16)
 
 
-def draw_lift(screen: object, mover: Mover, origin: Vec2, time: float) -> None:
+def draw_platforms(screen: object, entities: Entities, origin: Vec2) -> None:
+    """Grey bars for platforms that have left the pocket."""
     import pygame
 
-    x = mover.x - origin.x
-    y = mover.y - origin.y
-    cx = x + mover.w / 2
-    pulley_y = mover.pulley - origin.y
-    pygame.draw.line(screen, (150, 96, 62), (round(cx), round(pulley_y)), (round(cx), round(y)), 3)
-    pygame.draw.circle(screen, (96, 64, 48), (round(cx), round(pulley_y)), 7)
-    pygame.draw.circle(screen, (40, 28, 24), (round(cx), round(pulley_y)), 3)
-    body = pygame.Rect(round(x), round(y), round(mover.w), round(mover.h))
-    pygame.draw.rect(screen, (72, 80, 92), body)
-    pygame.draw.rect(screen, (176, 186, 198), body.inflate(-4, -4))
-    for i in range(3):
-        ox = x + mover.w * (i + 1) / 4
-        pygame.draw.circle(screen, (90, 98, 110), (round(ox), round(y + mover.h / 2)), 7, 2)
-    pulse = 0.65 + 0.35 * math.sin(time * 6.0) if mover.phase == "wait" else 1.0
-    green = (round(70 * pulse), round(210 * pulse), round(110 * pulse))
-    pygame.draw.circle(screen, green, (round(cx), round(y + mover.h / 2)), 5)
+    for slot in SLOTS:
+        entity = find_entity(entities, slot)
+        if entity is None:
+            continue
+        for col, row in entity.tiles:
+            x = round(col * TILE - origin.x)
+            y = round(row * TILE - origin.y)
+            pygame.draw.rect(screen, (72, 80, 92), (x, y, TILE, TILE))
+            pygame.draw.rect(screen, (176, 186, 198), (x + 4, y + 6, TILE - 8, TILE - 12))
+            pygame.draw.circle(screen, (90, 98, 110), (x + TILE // 2, y + TILE // 2), 6, 2)
+
+
+def draw_pocket(screen: object, entities: Entities) -> None:
+    """The platforms the agent is still holding, along the bottom left."""
+    import pygame
+
+    holding = pocket_slots(entities)
+    for index, slot in enumerate(SLOTS):
+        x = 12 + index * 150
+        y = VIEW.h - 46
+        held = slot in holding
+        pygame.draw.rect(screen, (16, 20, 32), (x, y, 136, 28))
+        color = (176, 186, 198) if held else (60, 66, 76)
+        pygame.draw.rect(screen, color, (x + 8, y + 8, 72, 12))
+        pygame.draw.circle(screen, (40, 28, 24), (x + 44, y + 14), 3)
+        try:
+            font = pygame.font.Font(None, 18)
+        except (NotImplementedError, pygame.error):
+            font = None
+        if font is not None:
+            label = slot if held else "placed"
+            text = font.render(label, True, (230, 236, 244))
+            screen.blit(text, (x + 86, y + 7))
 
 
 def draw_scene(
     screen: object,
     level: World,
-    movers: tuple[Mover, ...],
+    entities: Entities,
     origin: Vec2,
-    time: float,
     cleared: bool,
+    line: str,
 ) -> None:
     import pygame
 
@@ -210,13 +209,18 @@ def draw_scene(
     for cell in cells_overlapping(level, view):
         rect = cell.rect
         cell.draw(screen, Rect(rect.x - origin.x, rect.y - origin.y, rect.w, rect.h))
-    for a, b, sag in CHAINS:
-        _chain(screen, origin, a, b, sag)
     _sign(screen, origin)
-    _icicles(screen, origin)
     _snow_cap(screen, origin)
-    for mover in movers:
-        draw_lift(screen, mover, origin, time)
+    draw_platforms(screen, entities, origin)
+    draw_pocket(screen, entities)
+    bar = pygame.Rect(0, VIEW.h - 22, VIEW.w, 22)
+    pygame.draw.rect(screen, (236, 224, 196), bar)
+    try:
+        font = pygame.font.Font(None, 22)
+    except (NotImplementedError, pygame.error):
+        font = None
+    if font is not None:
+        screen.blit(font.render(line, True, (28, 24, 22)), (8, VIEW.h - 20))
     if cleared:
         banner = pygame.Rect(VIEW.w // 2 - 130, 16, 260, 28)
         pygame.draw.rect(screen, (16, 24, 48), banner)
@@ -226,7 +230,7 @@ def draw_scene(
         except (NotImplementedError, pygame.error):
             font = None
         if font is not None:
-            text = font.render("Crystal reached", True, (220, 235, 255))
+            text = font.render("Flag reached", True, (220, 235, 255))
             screen.blit(text, text.get_rect(center=banner.center))
 
 
@@ -245,7 +249,7 @@ def main() -> None:
         screen = pygame.display.set_mode(
             (VIEW.w, VIEW.h), pygame.SCALED | pygame.RESIZABLE, vsync=1
         )
-    pygame.display.set_caption("Grok the Gap — city lifts")
+    pygame.display.set_caption("Grok the Gap — city")
     audio = Audio()
     audio.start()
     try:
@@ -256,24 +260,25 @@ def main() -> None:
 
 
 async def run_level(screen, audio=None) -> None:
-    """Play the cable lifts on an existing window. Esc closes the level."""
+    """Play the chamber. Enter asks the agent to place a pocket platform."""
     import pygame
 
     from tilebase import art, blob, player
+    from tilebase.agent import AgentMiss, PlacedPlatform, ask_platforms
 
     canvas = pygame.Surface((VIEW.w, VIEW.h)).convert()
-    level = world()
-    start = spawn_point()
+    level, entities, start = open_room()
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
     if pygame.joystick.get_count() > 0:
         pad = pygame.joystick.Joystick(0)
 
-    def reset() -> tuple[player.Player, tuple[Mover, ...], bool]:
-        return player.spawn(start.x, start.y), lifts(), False
+    def reset():
+        room, held, spawn = open_room()
+        return room, held, spawn, player.spawn(spawn.x, spawn.y), False, False, Ground()
 
-    p, movers, cleared = reset()
+    level, entities, start, p, cleared, edited, ground = reset()
     prev_rect = p.body.rect
     look = blob.rest()
     puffs = blob.no_puffs()
@@ -282,19 +287,62 @@ async def run_level(screen, audio=None) -> None:
     freeze = 0.0
     shake = 0.0
     tick_no = 0
+    prompt = ""
+    asking = False
+    notice = "enter places a platform"
+    place_job: asyncio.Task[object] | None = None
     cam = clamp_cam(p.body.rect.center, level, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
+
+    def submit(text: str) -> None:
+        nonlocal notice, place_job
+        if place_job is not None:
+            return
+        frame = _frame_png(canvas)
+        notice = "placing a platform"
+        place_job = asyncio.create_task(asyncio.to_thread(ask_platforms, text, frame))
+
+    def finish_place(result: object) -> None:
+        nonlocal level, entities, edited, notice
+        if isinstance(result, PlacedPlatform):
+            edit = place_platform(level, entities, result.slot, result.col, result.row)
+            if isinstance(edit, EditSuccess):
+                level = edit.world
+                entities = edit.entities
+                edited = True
+                notice = f"{result.slot} at {result.col},{result.row}"
+            else:
+                notice = type(edit).__name__
+        elif isinstance(result, AgentMiss):
+            notice = result.message
+
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and asking:
+                if event.key == pygame.K_ESCAPE:
+                    asking = False
+                elif event.key == pygame.K_RETURN:
+                    text = prompt.strip()
+                    prompt = ""
+                    asking = False
+                    if text:
+                        submit(text)
+                elif event.key == pygame.K_BACKSPACE:
+                    prompt = prompt[:-1]
+                elif event.unicode.isprintable():
+                    prompt += event.unicode
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_RETURN:
+                    asking = True
+                    prompt = ""
                 elif event.key == pygame.K_r:
-                    p, movers, cleared = reset()
+                    level, entities, start, p, cleared, edited, ground = reset()
                     prev_rect = p.body.rect
                 if event.key in jump_codes:
                     latch = Latch(jump=True, dash=latch.dash)
@@ -309,9 +357,16 @@ async def run_level(screen, audio=None) -> None:
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
-        held = read_held(pygame, pygame.key.get_pressed(), pad)
-        ix = axis(held.left, held.right)
-        iy = axis(held.up, held.down)
+        if place_job is not None and place_job.done():
+            result = place_job.result()
+            place_job = None
+            finish_place(result)
+        held_keys = read_held(pygame, pygame.key.get_pressed(), pad)
+        if asking or place_job is not None:
+            held_keys = Held(False, False, False, False, False, False)
+            latch = Latch()
+        ix = axis(held_keys.left, held_keys.right)
+        iy = axis(held_keys.up, held_keys.down)
 
         if freeze > 0:
             freeze -= frame_dt
@@ -325,13 +380,15 @@ async def run_level(screen, audio=None) -> None:
             inp = player.Input(
                 x=ix,
                 y=iy,
-                jump=held.jump or latch.jump,
+                jump=held_keys.jump or latch.jump,
                 jump_pressed=latch.jump,
                 dash_pressed=latch.dash,
             )
             latch = Latch()
             prev_rect = p.body.rect
-            p, movers = ride_step(p, movers, level, blocks, inp, TICK)
+            prev_vel = p.vel
+            p = player.step(p, inp, level, blocks, TICK)
+            p, level, ground = ground_effects(p, prev_vel, level, ground, TICK)
             tick_no += 1
             if audio is not None:
                 audio.play_events(p.events, p.impact)
@@ -339,7 +396,7 @@ async def run_level(screen, audio=None) -> None:
             feet = Vec2(p.body.rect.center.x, p.body.rect.y + p.body.rect.h)
             puffs = blob.emit_puffs(puffs, p, feet, tick_no)
             puffs = blob.update_puffs(puffs, TICK)
-            if reached_crystal(level, p.body.rect):
+            if edited and overlaps_mark(level, p.body.rect, "goal"):
                 cleared = True
             if "dash" in p.events:
                 freeze = DASH_FREEZE
@@ -351,8 +408,10 @@ async def run_level(screen, audio=None) -> None:
                 if audio is not None:
                     audio.play("death")
                     shake = max(shake, 0.2)
-                p, movers, cleared = reset()
+                p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
+                level = mend(level, ground)
+                ground = Ground()
 
         alpha = 0.0 if freeze > 0 else acc / TICK
         draw_x = lerp(prev_rect.x, p.body.rect.x, alpha)
@@ -366,8 +425,14 @@ async def run_level(screen, audio=None) -> None:
             round(cam.x - VIEW.w / 2 + math.sin(now * 91.0) * jitter),
             round(cam.y - VIEW.h / 2 + math.cos(now * 77.0) * jitter),
         )
+        if cleared:
+            line = "you made it"
+        elif asking:
+            line = "> " + prompt + "_"
+        else:
+            line = notice
         art.draw_backdrop(canvas, cam, Size(level.cols * TILE, level.rows * TILE), VIEW)
-        draw_scene(canvas, level, movers, origin, now, cleared)
+        draw_scene(canvas, level, entities, origin, cleared, line)
         blob.draw_puffs(canvas, puffs, origin)
         art.draw_player(
             canvas,
