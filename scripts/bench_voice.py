@@ -1,4 +1,4 @@
-"""Time a recorded voice command from the end of speech to a placed box.
+"""Time a recorded voice command from the end of speech to a placed contraption.
 
     python -m scripts.bench_voice [wav] [runs]
     BENCH_MODEL_ONLY=1 python -m scripts.bench_voice   # skip speech, time ask() alone
@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 import websockets  # noqa: E402
 
 from tilebase import agent, speech  # noqa: E402
+from tilebase.contraptions import STARTING_STOCK as STOCK  # noqa: E402
 from tilebase.play import _same_words  # noqa: E402
 
 CHUNK_SECONDS = 0.1
@@ -60,7 +61,7 @@ def _level_png() -> bytes:
     p = player.spawn(level.spawn.x, level.spawn.y)
     rect = p.body.rect
     center = Vec2(rect.x + rect.w / 2, rect.y + rect.h / 2)
-    sheet = level_surface(level.world, level.entities, center, p, blob.rest(), p.dashes_left)
+    sheet = level_surface(level.world, center, p, blob.rest(), p.dashes_left)
     return _frame_png(sheet)
 
 
@@ -101,12 +102,12 @@ async def _stt(frames: bytes, rate: int, png: bytes) -> dict:
                 if not event.final:
                     if len(event.text.split()) >= 3 and not _same_words(event.text, guess_text):
                         guess_text = event.text
-                        guess = asyncio.create_task(asyncio.to_thread(agent.ask, guess_text, png))
+                        guess = asyncio.create_task(asyncio.to_thread(agent.ask, guess_text, png, STOCK))
                     continue
                 out["text"] = event.text
                 out["final_at"] = time.perf_counter()
                 out["guess_hit"] = guess is not None and _same_words(event.text, guess_text)
-                job = guess if out["guess_hit"] else asyncio.to_thread(agent.ask, event.text, png)
+                job = guess if out["guess_hit"] else asyncio.to_thread(agent.ask, event.text, png, STOCK)
                 out["result"] = await job
                 out["placed_at"] = time.perf_counter()
                 break
@@ -118,13 +119,13 @@ async def _stt(frames: bytes, rate: int, png: bytes) -> dict:
 
 
 def _in_gap(result: object) -> bool:
-    """The box hangs over the floor gap (cols 4-11) with air on both sides."""
+    """The contraption hangs over the floor gap (cols 4-11) with air on both sides."""
     return isinstance(result, agent.Placed) and 5 <= result.col <= 9 and result.row in (6, 7)
 
 
 def run_model(text: str, png: bytes) -> dict:
     asked = time.perf_counter()
-    result = agent.ask(text, png)
+    result = agent.ask(text, png, STOCK)
     took = time.perf_counter() - asked
     return {"text": text, "result": repr(result), "ok": _in_gap(result), "model": took, "total_after_speech": took}
 

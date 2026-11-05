@@ -1,4 +1,4 @@
-"""One tool. The model places the 64 by 64 box and cannot do anything else."""
+"""One tool. The model places one of the contraptions in stock and cannot do anything else."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from tilebase.contraptions import Stock, available, describe, contraption
 
 
 @dataclass(frozen=True)
@@ -35,41 +37,49 @@ PROVIDERS = {
 }
 
 SYSTEM = (
-    "You place one box on the level in the image. "
+    "You place one contraption on the level in the image. "
     "The image is the entire level, 30 tiles wide and 9 tiles tall. "
-    "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
-    "You have one tool, place_box. col and row are the top-left tile. "
+    "Each tile is 32 by 32 pixels. "
+    "Contraptions are one-time use: the user message lists the ones still left. "
+    "You have one tool, place_contraption. name picks the contraption. "
+    "col and row are its top-left tile. "
     "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
+    "A contraption can only go on air or on spikes or lava, never on solid tiles, the exit, or the player. "
     "Stone, the wooden bridge, the crate, and the barred door are solid. "
     "The gold platform can be jumped up through. Spikes kill. The green flag is the exit. "
     "Pale blue ice is solid and slippery. The red spring on a coil is solid and bounces you high. "
     "Glowing orange-red lava kills on touch. Brown cracked rock is solid but falls when stood on. "
-    "The orange square is the box if it is already placed. The character is the player. "
-    "Put the box on the thing the player names. "
+    "The character is the player. "
+    "Pick the contraption that fits what the player asks for and put it on the thing they name. "
     "The floor is the bottom row, so covering a floor tile uses the row above it. "
-    "If they do not name a place, cover the spikes. "
+    "If they do not name a place or a contraption, cover the spikes with whatever fits. "
     "Do not cover the player or the exit. Call the tool once."
 )
 
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "place_box",
-        "description": "Place the 64x64 box. col and row are its top-left tile.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "col": {"type": "integer"},
-                "row": {"type": "integer"},
+
+def tool(stock: Stock) -> dict:
+    """The one tool. `name` can only be a contraption still in stock."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "place_contraption",
+            "description": "Place one contraption. col and row are its top-left tile.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "enum": [c.id for c in available(stock)]},
+                    "col": {"type": "integer"},
+                    "row": {"type": "integer"},
+                },
+                "required": ["name", "col", "row"],
             },
-            "required": ["col", "row"],
         },
-    },
-}
+    }
 
 
 @dataclass(frozen=True)
 class Placed:
+    name: str
     col: int
     row: int
 
@@ -156,8 +166,10 @@ def warm() -> None:
     _give(host, conn)
 
 
-def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
-    """Send a PNG of the whole level and the player's sentence. Return the tool's tile."""
+def ask(prompt: str, level_png: bytes, stock: Stock) -> Placed | AgentMiss:
+    """Send a PNG of the whole level, the stock left, and the player's sentence."""
+    if not stock:
+        return AgentMiss("no contraptions left")
     chosen = provider()
     key = _setting(chosen.key_name)
     if key is None:
@@ -173,10 +185,10 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
         # Image before text: the unchanged level is a cacheable prefix.
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": [image, {"type": "text", "text": prompt}]},
+            {"role": "user", "content": [image, {"type": "text", "text": f"Left: {describe(stock)}.\n{prompt}"}]},
         ],
-        "tools": [TOOL],
-        "tool_choice": {"type": "function", "function": {"name": "place_box"}},
+        "tools": [tool(stock)],
+        "tool_choice": {"type": "function", "function": {"name": "place_contraption"}},
     }
     try:
         status, raw = _post(
@@ -197,16 +209,19 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
     message = data["choices"][0]["message"]
     calls = message.get("tool_calls") or []
     if not calls:
-        return AgentMiss("the model did not place the box")
+        return AgentMiss("the model did not place anything")
     function = calls[0].get("function") or {}
-    if function.get("name") != "place_box":
+    if function.get("name") != "place_contraption":
         return AgentMiss("the model called a different tool")
     arguments = function.get("arguments")
     parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
     if not isinstance(parsed, dict):
-        return AgentMiss("place_box arguments were not an object")
+        return AgentMiss("place_contraption arguments were not an object")
+    name = parsed.get("name")
     col = parsed.get("col")
     row = parsed.get("row")
+    if not isinstance(name, str) or contraption(name) is None:
+        return AgentMiss("place_contraption needs a contraption name")
     if not isinstance(col, int) or not isinstance(row, int):
-        return AgentMiss("place_box needs integer col and row")
-    return Placed(col, row)
+        return AgentMiss("place_contraption needs integer col and row")
+    return Placed(name, col, row)
