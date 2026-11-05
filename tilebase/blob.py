@@ -245,3 +245,107 @@ def draw_blob(screen: object, center: Vec2, look: Look, *, dashes_left: int) -> 
 
     small = pygame.transform.smoothscale(canvas, (size // SS, size // SS))
     screen.blit(small, small.get_rect(center=(round(center.x), round(center.y))))
+
+
+# --- Dust puffs -------------------------------------------------------------
+
+PUFF = (238, 232, 224)
+MAX_PUFFS = 48
+
+
+@dataclass(frozen=True)
+class Puff:
+    pos: Vec2  # world px
+    vel: Vec2
+    age: float
+    life: float
+    size: float  # final radius in px
+
+
+@dataclass(frozen=True)
+class Puffs:
+    items: tuple[Puff, ...] = ()
+
+
+def no_puffs() -> Puffs:
+    return Puffs()
+
+
+def _spray(
+    rng: random.Random, origin: Vec2, count: int, base: Vec2, spread: Vec2, size: float, life: float
+) -> list[Puff]:
+    out = []
+    for _ in range(count):
+        out.append(
+            Puff(
+                pos=Vec2(origin.x + rng.uniform(-2.0, 2.0), origin.y + rng.uniform(-1.0, 1.0)),
+                vel=Vec2(base.x + rng.uniform(-spread.x, spread.x), base.y + rng.uniform(-spread.y, spread.y)),
+                age=0.0,
+                life=life * rng.uniform(0.8, 1.2),
+                size=size * rng.uniform(0.7, 1.2),
+            )
+        )
+    return out
+
+
+def emit_puffs(puffs: Puffs, player: PlayerLike, feet: Vec2, seed: int) -> Puffs:
+    """Spawn dust for this frame's events. `feet` is the bottom-center in world px."""
+    events = player.events
+    if not events:
+        return puffs
+    rng = random.Random(seed)
+    new: list[Puff] = []
+    if "land" in events:
+        a = _clamp(player.impact / 960.0, 0.0, 1.0)
+        n = 2 + round(4 * a)
+        speed = 40.0 + 90.0 * a
+        for side in (-1.0, 1.0):
+            new += _spray(rng, Vec2(feet.x + side * 6.0, feet.y), n, Vec2(side * speed, -12.0), Vec2(20.0, 8.0), 2.0 + 2.0 * a, 0.3)
+    if "jump" in events:
+        for side in (-1.0, 1.0):
+            new += _spray(rng, Vec2(feet.x + side * 7.0, feet.y), 2, Vec2(side * 45.0, 6.0), Vec2(15.0, 8.0), 2.2, 0.25)
+    if "wall_jump" in events:
+        side = float(player.wall_dir) or -float(player.facing or 1)
+        wall = Vec2(feet.x + side * 13.0, feet.y - 8.0)
+        new += _spray(rng, wall, 4, Vec2(side * 8.0, 10.0), Vec2(8.0, 40.0), 2.6, 0.3)
+    if "dash" in events:
+        vx, vy = player.vel.x, player.vel.y
+        n = math.hypot(vx, vy) or 1.0
+        bx, by = -vx / n, -vy / n
+        tail = Vec2(feet.x + bx * RADIUS, feet.y - RADIUS + by * RADIUS)
+        new += _spray(rng, tail, 5, Vec2(bx * 70.0, by * 70.0), Vec2(25.0, 25.0), 3.0, 0.32)
+    return Puffs((puffs.items + tuple(new))[-MAX_PUFFS:])
+
+
+def update_puffs(puffs: Puffs, dt: float) -> Puffs:
+    drag = math.exp(-6.0 * dt)
+    out = []
+    for p in puffs.items:
+        age = p.age + dt
+        if age >= p.life:
+            continue
+        out.append(
+            Puff(
+                pos=Vec2(p.pos.x + p.vel.x * dt, p.pos.y + p.vel.y * dt),
+                vel=Vec2(p.vel.x * drag, p.vel.y * drag - 20.0 * dt),
+                age=age,
+                life=p.life,
+                size=p.size,
+            )
+        )
+    return Puffs(tuple(out))
+
+
+def draw_puffs(screen: object, puffs: Puffs, offset: Vec2) -> None:
+    import pygame
+
+    for p in puffs.items:
+        t = p.age / p.life
+        r = p.size * (0.4 + 0.6 * math.sqrt(t))
+        alpha = round(200 * (1.0 - t) ** 1.5)
+        if alpha <= 0 or r < 0.5:
+            continue
+        d = math.ceil(r * 2) + 2
+        dot = pygame.Surface((d, d), pygame.SRCALPHA)
+        pygame.draw.circle(dot, (*PUFF, alpha), (d / 2, d / 2), r)
+        screen.blit(dot, (round(p.pos.x - offset.x - d / 2), round(p.pos.y - offset.y - d / 2)))
