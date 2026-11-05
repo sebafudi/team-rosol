@@ -67,10 +67,12 @@ _GLYPHS = {
 # Sparse in the sky, dense on the hills. Each mark is a darker shade of that pixel.
 _RAMP = " .:-=+*#%@"
 _PROMPT = "> YOU JUMP"
-# Menu order. The yard is the original room; lifts is the cable-chamber level.
+# Menu order. The yard is the original room; lifts is the cable-chamber level;
+# trial spends one token per prompt.
 LEVELS = (
     ("yard", "YARD"),
     ("lifts", "LIFTS"),
+    ("trial", "TRIAL"),
 )
 
 
@@ -142,9 +144,11 @@ def ascii_layout(
         button_h = 20 if big else 16
         choices = (Rect((width - button_w) / 2, height - button_h - 22, button_w, button_h),)
     else:
-        button_w = 104 if big else 76
+        # Three buttons only fit the 320 px canvas a little narrower.
+        many = len(labels) > 2
+        button_w = (92 if many else 104) if big else (64 if many else 76)
         button_h = 20 if big else 16
-        gap = 12
+        gap = 8 if many else 12
         total = button_w * len(labels) + gap * (len(labels) - 1)
         x0 = (width - total) / 2
         y = height - button_h - 16
