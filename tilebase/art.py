@@ -65,10 +65,14 @@ def backdrop_offset(cam: Vec2, world: Size, view: Size, art: Size) -> Vec2:
 def _load(path: Path) -> object:
     import pygame
 
-    image = pygame.image.load(str(path))
-    if pygame.display.get_surface() is not None:
-        image = image.convert_alpha()
-    return image
+    if pygame.image.get_extended():
+        image = pygame.image.load(str(path))
+        if pygame.display.get_surface() is not None:
+            image = image.convert_alpha()
+        return image
+    from tilebase.png import load_png
+
+    return load_png(path)
 
 
 def _cached(key: tuple, make: Callable[[], object]) -> object:

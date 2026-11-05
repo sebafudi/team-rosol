@@ -69,10 +69,14 @@ def run(
     blocks: Blocks,
     draw_body: DrawFn,
     max_frames: int | None = None,
+    window: tuple | None = None,
 ) -> Body:
     import pygame
 
-    screen, canvas, fitted = open_fullscreen(screen_size)
+    if window is None:
+        screen, canvas, fitted = open_fullscreen(screen_size)
+    else:
+        screen, canvas, fitted = window
     clock = pygame.time.Clock()
     frames = 0
     while max_frames is None or frames < max_frames:
