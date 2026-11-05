@@ -3,7 +3,7 @@ from tilebase.loop import run
 from tilebase.move import Body, Frame
 from tilebase.tiles import Cell, World, define, load_map
 
-TILE = 16
+TILE = 32
 SCREEN = Size(320, 180)
 
 ROWS = (
