@@ -117,6 +117,43 @@ def tile_drawer(name: str) -> Callable[[object, Rect], None]:
     return draw
 
 
+def spike_drawer() -> Callable[[object, Rect], None]:
+    """The spike sheet is opaque magenta above the metal. Punch that out."""
+
+    def draw(screen: object, rect: Rect) -> None:
+        size = round(rect.w)
+        screen.blit(_spiked(size), (round(rect.x), round(rect.y)))
+
+    return draw
+
+
+def _spiked(size: int) -> object:
+    import pygame
+
+    def make() -> object:
+        image = _punch_magenta(_load(ASSETS / "tiles" / "spike.png"))
+        return pygame.transform.smoothscale(image, (size, size))
+
+    return _cached(("spike-keyed", size), make)
+
+
+def _punch_magenta(image: object) -> object:
+    """Drop the backdrop magenta. Gold, iron, and the stone lip stay."""
+    import pygame
+
+    if pygame.display.get_surface() is not None:
+        image = image.convert_alpha()
+    else:
+        image = image.copy()
+    width, height = image.get_size()
+    raw = bytearray(pygame.image.tobytes(image, "RGBA"))
+    for index in range(0, len(raw), 4):
+        red, green, blue = raw[index], raw[index + 1], raw[index + 2]
+        if green < 48 and red > 170 and blue > 90:
+            raw[index + 3] = 0
+    return pygame.image.frombytes(bytes(raw), (width, height), "RGBA")
+
+
 def backdrop_image(view: Size) -> object:
     import pygame
 

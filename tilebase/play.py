@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from tilebase.art import tile_drawer
 from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
+from tilebase.kinds import blocks_cell, hurt_at, overlaps_mark
 from tilebase.move import Body
 from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
 from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
@@ -99,7 +100,7 @@ def clamp_cam(center: Vec2, world: World, view: Size) -> Vec2:
 
 
 def blocks(cell: Cell, body: Body, delta: Vec2) -> bool:
-    return "blocks" in cell.marks
+    return blocks_cell(cell, body, delta)
 
 
 def spawn_point(rows: tuple[str, ...]) -> Vec2:
@@ -211,7 +212,7 @@ async def run() -> None:
     listening = False
     heard: asyncio.Queue[object] = asyncio.Queue()
     mic: asyncio.Task[None] | None = None
-    notice = "enter type    v talk"
+    notice = "name a tile   enter   v talk"
     edited = False
     cleared = False
     ledger = finite_ledger(0)
@@ -374,13 +375,16 @@ async def run() -> None:
                 break
             if "land" in p.events and p.impact > 800:
                 shake = max(shake, 0.06)
-            # Below the map is a kill plane: the death sound, then respawn.
-            if p.body.rect.y > world.rows * TILE + 64:
+            # Spikes kill on contact. Below the map is the same respawn.
+            if hurt_at(world, p.body.rect) or p.body.rect.y > world.rows * TILE + 64:
                 audio.play("death")
                 shake = max(shake, 0.2)
                 p = player.spawn(start.x, start.y)
                 prev_rect = p.body.rect
-            elif edited and overlaps_exit(p.body.rect, entities):
+            elif edited and (
+                overlaps_mark(world, p.body.rect, "goal")
+                or overlaps_exit(p.body.rect, entities)
+            ):
                 cleared = True
 
         alpha = 0.0 if freeze > 0 else acc / TICK

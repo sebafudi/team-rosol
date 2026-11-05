@@ -9,16 +9,20 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from tilebase.kinds import LEGEND
+
 MODEL = "x-ai/grok-4.7"
 
 SYSTEM = (
     "You place one box on a tile map. The box is 64 by 64 pixels, "
     "which is 2 tiles by 2 tiles. Tiles are 32 pixels. "
     "You have one tool, place_box. col and row are the top-left tile. "
-    "Rows grow downward. # is solid, . is air, P is the player, E is the exit, "
-    "B is the box if it is already placed. "
-    "The floor gap is the dots on the bottom row, columns 4 through 11. "
-    "Call place_box with row 7 and col 6, 7, or 8, so air remains on both sides of the box. "
+    "Rows grow downward. "
+    f"{LEGEND}. "
+    "Put the box on the kind the player names. "
+    "col and row are its top-left, and it also fills the next column and the next row. "
+    "The floor is the bottom row, so covering a floor tile uses the row above it. "
+    "If they do not name a place, cover the spikes. "
     "The image is the screen the player sees right now, before you place anything. "
     "Do not cover P or E. Call the tool once."
 )
