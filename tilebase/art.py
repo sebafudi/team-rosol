@@ -90,6 +90,11 @@ def tile_image(name: str, size: int) -> object:
     )
 
 
+def source_image(*parts: str) -> object:
+    """An asset at its full painted size, loaded once."""
+    return _cached(("source", *parts), lambda: _load(ASSETS.joinpath(*parts)))
+
+
 def icon_image(name: str, size: int, color: tuple[int, int, int]) -> object:
     """A white icon from `assets/icons`, scaled to `size` and tinted `color`."""
     import pygame
