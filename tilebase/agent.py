@@ -39,7 +39,7 @@ PROVIDERS = {
 
 SYSTEM = (
     "You place one contraption on the level in the image. "
-    "The image is the entire level, 30 tiles wide and 9 tiles tall. "
+    "The image is the entire level, {cols} tiles wide and {rows} tiles tall. "
     "Each tile is 32 by 32 pixels. "
     "Contraptions are one-time use: the user message lists the ones still left. "
     "You have one tool, place_contraption. name picks the contraption. "
@@ -58,7 +58,7 @@ SYSTEM = (
     "The user message also has the level as a text grid with column numbers on top and row numbers on the left. "
     "Below the grid is a list of landmarks with their columns and rows already counted. Take col and row from that list, not by measuring the image. "
     "Grid key: . air, # stone, - wooden bridge, = gold platform, b crate, D door, ^ spikes, "
-    "~ ice, * spring, L lava, c cracked rock, E exit, P the player. "
+    "~ ice, * spring, L lava, c cracked rock, E exit, o token pickup (never cover it), P the player. "
     "Call the tool once."
 )
 
@@ -79,7 +79,7 @@ def level_grid(rows: tuple[str, ...], player: tuple[int, int] | None = None) -> 
 
 _NAMES = {
     "-": "wooden bridge", "=": "gold platform", "b": "crate", "D": "door", "^": "spikes",
-    "~": "ice", "*": "spring", "L": "lava", "c": "cracked rock", "E": "exit",
+    "~": "ice", "*": "spring", "L": "lava", "c": "cracked rock", "E": "exit", "o": "token",
 }
 
 
@@ -219,7 +219,13 @@ def warm() -> None:
     _give(host, conn)
 
 
-def ask(prompt: str, level_png: bytes, stock: Stock, grid: str = "") -> Placed | AgentMiss:
+def ask(
+    prompt: str,
+    level_png: bytes,
+    stock: Stock,
+    grid: str = "",
+    size: tuple[int, int] = (30, 9),
+) -> Placed | AgentMiss:
     """Send a PNG of the whole level, its text grid, the stock left, and the player's sentence."""
     if not stock:
         return AgentMiss("no contraptions left")
@@ -237,7 +243,7 @@ def ask(prompt: str, level_png: bytes, stock: Stock, grid: str = "") -> Placed |
         **chosen.extra,
         # Image before text: the unchanged level is a cacheable prefix.
         "messages": [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": SYSTEM.format(cols=size[0], rows=size[1])},
             {"role": "user", "content": [image, {"type": "text", "text": f"Level grid:\n{grid}\n\nLeft: {describe(stock)}.\n{prompt}"}]},
         ],
         "tools": [tool(stock)],
