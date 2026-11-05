@@ -58,6 +58,7 @@ def ask(prompt: str, grid: str) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
+        "reasoning": {"effort": "none"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": f"{grid}\n\nPlayer: {prompt}"},
