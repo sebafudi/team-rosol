@@ -18,6 +18,16 @@ These three frames are the browser build of the current game (`scripts/build_web
 
 Enter, Space, or a click on **Play** leaves the title. The ball starts on the left. Five floor tiles are missing in the middle. Drop through that hole and you come back on the left.
 
+## Demo walkthrough
+
+The YARD level, recorded from the real game (desktop build, live Grok calls). Each line is typed into the in-game prompt box; the AI places a plank on the lava, a second plank, the crate on the spikes and the step in the gap. The ball then bounces off the spring, crosses, and the game says **you made it**. Full video: [`docs/demo/walkthrough.mp4`](docs/demo/walkthrough.mp4).
+
+![YARD walkthrough](docs/demo/walkthrough.gif)
+
+| Prompt typed in game | Two planks bridge the lava | Exit reached |
+| --- | --- | --- |
+| ![Prompt box](docs/demo/prompt.png) | ![Planks over lava](docs/demo/planks.png) | ![You made it](docs/demo/cleared.png) |
+
 ## Why this exists
 
 Most “AI in a game” is a chatterbot or a second shooter. We want the AI to be a **live level editor** that only acts when you ask, and only by moving things you can see.
