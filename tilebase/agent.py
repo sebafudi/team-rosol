@@ -9,18 +9,19 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-MODEL = "x-ai/grok-4.7"
+MODEL = "google/gemini-3.1-flash-lite"
 
 SYSTEM = (
     "You place one box on the level in the image. "
-    "The image is the entire level, top-left corner first. "
+    "The image is the entire level, 20 tiles wide and 9 tiles tall. "
     "Each tile is 32 by 32 pixels. The box is 64 by 64 pixels, two tiles by two tiles. "
     "You have one tool, place_box. col and row are the top-left tile. "
-    "Rows grow downward. "
+    "Column 0 is the left edge. Row 0 is the top. Rows grow downward. "
+    "The floor gap is columns 4 through 11 on the bottom row. "
+    "Call place_box with row 7 and col 6, 7, or 8, so air remains on both sides of the box. "
     "Stone tiles are solid. The orange square is the box if it is already placed. "
     "The green tile is the exit. The character is the player. "
-    "Do not cover the player or the exit. "
-    "Call place_box once so the player can cross the gap in the floor."
+    "Do not cover the player or the exit. Call the tool once."
 )
 
 
@@ -60,7 +61,6 @@ def ask(prompt: str, level_png: bytes) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
-        "reasoning": {"effort": "low"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
