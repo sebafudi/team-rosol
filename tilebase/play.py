@@ -198,6 +198,7 @@ async def run() -> None:
         pygame.quit()
         return
     from tilebase.agent import AgentMiss, Placed, ask
+    from tilebase.speech import ListenError, Transcript
     from tilebase.box import draw_marks, open_level, overlaps_exit, place_box, render_map
     from tilebase.edit import EditSuccess
 
@@ -207,7 +208,10 @@ async def run() -> None:
     start = level.spawn
     prompt = ""
     asking = False
-    notice = "enter  ask for the box"
+    listening = False
+    heard: asyncio.Queue[object] = asyncio.Queue()
+    mic: asyncio.Task[None] | None = None
+    notice = "enter type    v talk"
     edited = False
     cleared = False
     ledger = finite_ledger(0)
@@ -230,11 +234,45 @@ async def run() -> None:
     cam = clamp_cam(p.body.rect.center, world, VIEW)
     clock = pygame.time.Clock()
     last = pygame.time.get_ticks() / 1000.0
+    async def _hear() -> None:
+        from tilebase.speech import listen
+
+        async for event in listen():
+            heard.put_nowait(event)
+            if isinstance(event, ListenError):
+                return
+            if isinstance(event, Transcript) and event.final:
+                return
+
+    def submit(text: str) -> None:
+        nonlocal world, entities, edited, notice
+        notice = "placing the box"
+        _bar(screen, notice)
+        pygame.display.flip()
+        result = ask(text, render_map(world, entities, p.body.rect))
+        if isinstance(result, Placed):
+            edit = place_box(world, entities, result.col, result.row)
+            if isinstance(edit, EditSuccess):
+                world = edit.world
+                entities = edit.entities
+                edited = True
+                notice = f"box at {result.col},{result.row}"
+            else:
+                notice = type(edit).__name__
+        elif isinstance(result, AgentMiss):
+            notice = result.message
+
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and listening:
+                if event.key == pygame.K_ESCAPE:
+                    listening = False
+                    asking = False
+                    if mic is not None and not mic.done():
+                        mic.cancel()
             elif event.type == pygame.KEYDOWN and asking:
                 if event.key == pygame.K_ESCAPE:
                     asking = False
@@ -243,24 +281,10 @@ async def run() -> None:
                     prompt = ""
                     asking = False
                     if text:
-                        notice = "placing the box"
-                        _bar(screen, notice)
-                        pygame.display.flip()
-                        result = ask(text, render_map(world, entities, p.body.rect))
-                        if isinstance(result, Placed):
-                            edit = place_box(world, entities, result.col, result.row)
-                            if isinstance(edit, EditSuccess):
-                                world = edit.world
-                                entities = edit.entities
-                                edited = True
-                                notice = f"box at {result.col},{result.row}"
-                            else:
-                                notice = type(edit).__name__
-                        elif isinstance(result, AgentMiss):
-                            notice = result.message
+                        submit(text)
                 elif event.key == pygame.K_BACKSPACE:
                     prompt = prompt[:-1]
-                elif event.unicode.isprintable() and len(prompt) < 48:
+                elif event.unicode.isprintable():
                     prompt += event.unicode
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -268,6 +292,11 @@ async def run() -> None:
                 elif event.key == pygame.K_RETURN:
                     asking = True
                     prompt = ""
+                elif event.key == pygame.K_v and not WEB and (mic is None or mic.done()):
+                    listening = True
+                    asking = True
+                    prompt = ""
+                    mic = asyncio.create_task(_hear())
                 elif event.key == pygame.K_r:
                     p = player.spawn(start.x, start.y)
                     prev_rect = p.body.rect
@@ -287,6 +316,21 @@ async def run() -> None:
             elif event.type == pygame.JOYDEVICEADDED and pad is None:
                 pad = pygame.joystick.Joystick(event.device_index)
 
+        while not heard.empty():
+            event = heard.get_nowait()
+            if isinstance(event, ListenError):
+                listening = False
+                asking = False
+                notice = event.message
+            elif listening and isinstance(event, Transcript):
+                prompt = event.text
+                if event.final:
+                    listening = False
+                    asking = False
+                    text = prompt.strip()
+                    prompt = ""
+                    if text:
+                        submit(text)
         now = pygame.time.get_ticks() / 1000.0
         frame_dt = now - last
         last = now
@@ -369,7 +413,9 @@ async def run() -> None:
         draw_balance(screen, ledger.balance, VIEW.w)
         if cleared:
             line = "you made it"
-        elif asking:
+        elif listening and not prompt:
+            line = "listening"
+        elif asking or listening:
             line = "> " + prompt + "_"
         else:
             line = notice
@@ -388,6 +434,8 @@ async def run() -> None:
         else:
             clock.tick(0 if _has_vsync(pygame) else 240)
         await asyncio.sleep(0)
+    if mic is not None and not mic.done():
+        mic.cancel()
     audio.stop()
     pygame.quit()
 
