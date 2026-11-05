@@ -1,0 +1,223 @@
+# Named Map-Object Edit API
+
+A structured, safe layer above raw `put_cell` for editing named entities in the tile world.
+
+## Overview
+
+The edit API lets you define named entities (platforms, doors, gates) and apply structured commands (move, place, remove, toggle) with automatic safety checks. All edits return new immutable worlds, preserving the functional style of the existing codebase.
+
+## Quick Start
+
+```python
+from tilebase.edit import Entity, Command, apply_edit, define_entities
+from tilebase.geom import Rect
+
+# 1. Define named entities
+world, entities = define_entities(
+    world,
+    (
+        Entity(id="plat1", type="platform", tiles=((5, 8), (6, 8), (7, 8))),
+        Entity(id="door1", type="door", tiles=((10, 5),), open=False),
+    ),
+    bounds=Rect(0, 0, 640, 320),  # Allowed edit area
+    exit_tiles=frozenset({(18, 5)}),  # Protected exit
+    spawn_rect=Rect(32, 200, 12, 14),  # Player spawn area
+)
+
+# 2. Apply a move command
+result = apply_edit(
+    world,
+    entities,
+    Command(op="move", id="plat1", by=(0, -2))  # Move up 2 tiles
+)
+
+# 3. Handle the result
+if isinstance(result, EditSuccess):
+    new_world = result.world
+    new_entities = result.entities
+    print(f"Changed {len(result.changed_tiles)} tiles")
+else:
+    print(f"Edit rejected: {type(result).__name__}")
+```
+
+## Entity Types
+
+- **platform**: Solid blocks that can be moved
+- **door**: Toggleable barriers (open/closed)
+- **gate**: Similar to doors
+
+Each entity has:
+- `id`: Unique identifier (string)
+- `type`: Entity type (string)
+- `tiles`: Tuple of `(col, row)` positions
+- `open`: Boolean for toggleable types (default `False`)
+
+## Commands
+
+All commands use the `Command(op, id, ...)` structure:
+
+### Move
+```python
+Command(op="move", id="plat1", by=(dx, dy))
+```
+Shifts an entity by `(dx, dy)` tiles. Old tiles are cleared, new tiles are filled.
+
+### Place
+```python
+Command(op="place", id="new_plat", tiles=((5, 3), (6, 3)))
+```
+Creates a new platform entity at the specified tiles.
+
+### Remove
+```python
+Command(op="remove", id="plat1")
+```
+Deletes an entity, clearing its tiles to empty.
+
+### Toggle
+```python
+Command(op="toggle", id="door1")
+```
+Flips a door/gate between open (empty tile) and closed (solid tile).
+
+## Safety Checks
+
+All edits are validated before application:
+
+1. **Bounds check**: Edits outside `bounds` are rejected (`OutOfBounds`)
+2. **Exit protection**: Blocking `exit_tiles` is rejected (`ExitBlocked`)
+3. **Spawn protection**: Overlapping `spawn_rect` is rejected (`PlayerBuried`)
+4. **Entity existence**: Unknown `id` returns `UnknownEntity`
+5. **Operation validity**: Unknown `op` returns `UnknownOp`
+
+## Result Types
+
+### Success
+- `EditSuccess(world, entities, changed_tiles)`: New world + entities, plus tiles that were modified
+
+### Errors
+- `UnknownOp(op)`: Invalid operation name
+- `UnknownEntity(id)`: Entity not found
+- `OutOfBounds(tiles)`: Edit extends beyond allowed bounds
+- `ExitBlocked(tiles)`: Would block protected exit tiles
+- `PlayerBuried(tiles)`: Would overlap player spawn area
+- `InvalidOperation(reason)`: Other validation failure
+
+## Query Helpers
+
+```python
+# Find entity by id
+entity = find_entity(entities, "plat1")
+
+# Get all entities of a type
+platforms = entities_by_type(entities, "platform")
+
+# Find entities at a tile position
+at_tile = entity_at_tile(entities, col=5, row=8)
+
+# Get entity bounding box in world coordinates
+bounds = entity_bounds(entity, tile_size=32)
+```
+
+## Validation
+
+Pre-validate commands before applying:
+
+```python
+error = validate_command(entities, cmd)
+if error:
+    print(f"Invalid: {error}")
+else:
+    result = apply_edit(world, entities, cmd)
+```
+
+## Batch Edits
+
+Apply multiple commands in sequence:
+
+```python
+from tilebase.edit import apply_edits
+
+result = apply_edits(
+    world,
+    entities,
+    (
+        Command(op="move", id="plat1", by=(0, -2)),
+        Command(op="toggle", id="door1"),
+        Command(op="move", id="plat2", by=(3, 0)),
+    )
+)
+```
+
+Stops at the first error and returns it. On success, returns all changed tiles.
+
+## Game Integration
+
+For live game integration with queued edits and visual feedback:
+
+```python
+from tilebase.edit_integration import (
+    create_edit_state,
+    queue_edit,
+    apply_pending_edits,
+    update_highlights,
+    tile_rects,
+)
+
+# Initialize
+state = create_edit_state(world, entities)
+
+# Queue an edit (optionally with preview)
+state = queue_edit(state, Command(op="move", id="plat1", by=(0, -1)))
+
+# Apply all pending edits (returns results + updated state with highlights)
+state, results = apply_pending_edits(state)
+
+# Each frame: decay highlight timer
+state = update_highlights(state)
+
+# Render highlights (convert tile positions to rects)
+for rect in tile_rects(state.highlight_tiles, tile_size):
+    draw_highlight(screen, rect)
+```
+
+The `EditState` tracks the world, entities, pending edits, and highlight tiles with a frame counter for visual feedback.
+
+### Natural Language → Command
+
+`prompt_to_command` provides a simple stub for translating prompts:
+
+```python
+from tilebase.edit_integration import prompt_to_command
+
+cmd = prompt_to_command("raise the left platform", entities)
+if cmd:
+    state = queue_edit(state, cmd)
+```
+
+Replace the stub implementation with an actual parser or LLM call for production use.
+
+## Demos
+
+### Core API Demo
+
+```bash
+python3 -m tilebase.edit_demo
+```
+
+Creates a world with two platforms, moves one up by 2 tiles, verifies collision detection, and tests safety rejection.
+
+### Integration Demo
+
+```bash
+python3 -m tilebase.integration_demo
+```
+
+Shows queued edits, natural language prompts, and highlight tracking for game loop integration.
+
+## Integration Notes
+
+- Works with existing `World` and `put_cell` from `tiles.py`
+- Returns new immutable worlds (no in-place mutation)
+- Follows frozen dataclass pattern used throughout the codebase
+- Designed for AI prompt → structured command → safe execution flow
