@@ -1,10 +1,13 @@
-"""One 64 by 64 box. The model may place it, and nothing else."""
+"""One 64 by 64 box. The model may place it, and nothing else.
+
+The other tiles are landmarks with their own behavior, so a prompt can say
+where: the spikes, the bridge, the door, the platform, the crate, the flag.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tilebase.art import tile_drawer
 from tilebase.edit import (
     Command,
     EditResult,
@@ -15,26 +18,29 @@ from tilebase.edit import (
 )
 from tilebase.edit_integration import tile_rects
 from tilebase.geom import Rect, Size, Vec2
-from tilebase.tiles import World, cells_overlapping, define, load_map
+from tilebase.kinds import level_tiles
+from tilebase.tiles import World, cells_overlapping, load_map
 
 TILE = 32
 SPAN = 2
 BOX_ID = "box"
 
-# Eight missing floor tiles. A dash covers about four and a half, so the
-# gap stays a fall until the box sits in it.
+# The pit is wider than a dash-jump. Spikes mark where the box belongs.
+# The shelf on the left stays over stone, short of the lip. The start floor is
+# ice, a spring sits at the lip, lava fills the pit's left half, and cracked
+# rock hangs over it: each kind is something a prompt can name.
 ROWS = (
-    "####################",
-    "#..................#",
-    "#..................#",
-    "#..................#",
-    "#..................#",
-    "#..................#",
-    "#..................#",
-    "#..................#",
-    "####........########",
+    "##############################",
+    "#............................#",
+    "#............................#",
+    "#............................#",
+    "#..........ccc...............#",
+    "#............................#",
+    "#---==b....................EE#",
+    "#.......*................D.EE#",
+    "#~~~~~~~#LLLLLL^^.......######",
 )
-EXIT = frozenset({(16, 7)})
+EXIT = frozenset({(27, 6), (28, 6), (27, 7), (28, 7)})
 
 
 @dataclass(frozen=True)
@@ -54,19 +60,11 @@ def box_tiles(col: int, row: int) -> tuple[tuple[int, int], ...]:
 def open_level() -> Level:
     loaded = load_map(
         ROWS,
-        (
-            define(".", id="empty", draw=lambda _s, _r: None, marks=frozenset()),
-            define(
-                "#",
-                id="solid",
-                draw=tile_drawer("solid"),
-                marks=frozenset({"blocks"}),
-            ),
-        ),
+        level_tiles(),
         tile_size=TILE,
     )
     assert isinstance(loaded, World)
-    spawn = Vec2(TILE * 2, loaded.rows * TILE - TILE - 22)
+    spawn = Vec2(TILE * 4 + (TILE - 22) / 2, loaded.rows * TILE - TILE - 22)
     _world, entities = define_entities(
         loaded,
         (),
@@ -133,20 +131,15 @@ def overlaps_exit(body: Rect, entities: Entities) -> bool:
 
 
 def draw_marks(screen: object, origin: Vec2, entities: Entities) -> None:
-    """Paint the box and the exit in screen space, on top of the tiles."""
+    """Paint the placed box. The flag and the other kinds are real tiles."""
     import pygame
 
     box = find_entity(entities, BOX_ID)
-    if box is not None:
-        for rect in tile_rects(frozenset(box.tiles), TILE):
-            pygame.draw.rect(
-                screen,
-                (196, 112, 48),
-                (int(rect.x - origin.x), int(rect.y - origin.y), TILE, TILE),
-            )
-    for rect in tile_rects(entities.exit_tiles, TILE):
+    if box is None:
+        return
+    for rect in tile_rects(frozenset(box.tiles), TILE):
         pygame.draw.rect(
             screen,
-            (48, 120, 72),
+            (196, 112, 48),
             (int(rect.x - origin.x), int(rect.y - origin.y), TILE, TILE),
         )

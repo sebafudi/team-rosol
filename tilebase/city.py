@@ -5,7 +5,8 @@ Run with `python -m tilebase.city`.
 The room follows the cable-lift chamber: a snowy ledge on the left, stone
 arches, two ice masses, and a pair of lifts hanging in the center. Stand on
 a lift and it climbs to the ice beside it, pauses, then returns. From either
-ice shelf a jump reaches the sill under the crystal.
+ice shelf a jump reaches the sill under the crystal. The shaft below the
+floor is spikes.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import math
 
 from tilebase.art import tile_drawer
 from tilebase.geom import Rect, Size, Vec2
+from tilebase.kinds import hurt_at, level_tiles
 from tilebase.movers import Mover, ride_step
 from tilebase.play import (
     DASH_FREEZE,
@@ -56,7 +58,7 @@ ROWS = (
     "########..............########",
     "..............................",
     "..............................",
-    "..............................",
+    "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
 )
 
 # Sagging cables between the ice masses, in world pixels.
@@ -65,10 +67,6 @@ CHAINS = (
     ((10 * TILE, 9 * TILE + 4), (22 * TILE, 9 * TILE + 10), 36.0),
     ((6 * TILE, 7 * TILE), (14 * TILE, 5 * TILE + 20), 18.0),
 )
-
-
-def _draw_empty(screen: object, rect: Rect) -> None:
-    return None
 
 
 def _draw_snow(screen: object, rect: Rect) -> None:
@@ -102,8 +100,7 @@ def world() -> World:
     loaded = load_map(
         rows,
         (
-            define(".", id="empty", draw=_draw_empty, marks=frozenset()),
-            define("#", id="solid", draw=tile_drawer("solid"), marks=frozenset({"blocks"})),
+            *level_tiles(),
             define("s", id="snow", draw=_draw_snow, marks=frozenset({"blocks"})),
             define("i", id="ice", draw=_draw_ice, marks=frozenset({"blocks"})),
             define("o", id="crystal", draw=_draw_crystal, marks=frozenset({"goal"})),
@@ -350,7 +347,7 @@ async def run_level(screen, audio=None) -> None:
                 break
             if "land" in p.events and p.impact > 800:
                 shake = max(shake, 0.06)
-            if p.body.rect.y > level.rows * TILE + 64:
+            if hurt_at(level, p.body.rect) or p.body.rect.y > level.rows * TILE + 64:
                 if audio is not None:
                     audio.play("death")
                     shake = max(shake, 0.2)
