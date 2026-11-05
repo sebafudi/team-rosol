@@ -20,13 +20,15 @@ Most "AI in a game" is a chatterbot or a second shooter. We want the AI to be a 
 
 ## Demo
 
+### live demo video with voice
+
+[![Chris demo](https://img.youtube.com/vi/cwMLeEJvMvo/hqdefault.jpg)](https://youtu.be/cwMLeEJvMvo)
+
 The YARD level, recorded from the desktop build with live Grok calls. Each line is typed into the in-game prompt box; the AI places a plank on the lava, a second plank, the crate on the spikes and the step in the gap. The ball bounces off the spring, crosses, and the game says **you made it**. Full video: [`docs/demo/walkthrough.mp4`](docs/demo/walkthrough.mp4).
 
 | Prompt typed in game | Two planks bridge the lava | Exit reached |
 | --- | --- | --- |
 | ![Prompt box](docs/demo/prompt.png) | ![Planks over lava](docs/demo/planks.png) | ![You made it](docs/demo/cleared.png) |
-
-[![Chris demo](https://img.youtube.com/vi/cwMLeEJvMvo/hqdefault.jpg)](https://youtu.be/cwMLeEJvMvo)
 
 ## How a level plays
 
