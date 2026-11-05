@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-MODEL = "x-ai/grok-4.3"
+MODEL = "x-ai/grok-4.7"
 
 SYSTEM = (
     "You place one box on a tile map. The box is 64 by 64 pixels, "
@@ -60,7 +60,7 @@ def ask(prompt: str, grid: str, frame_png: bytes) -> Placed | AgentMiss:
     payload = {
         "model": MODEL,
         "temperature": 0,
-        "reasoning": {"effort": "none"},
+        "reasoning": {"effort": "minimal"},
         "messages": [
             {"role": "system", "content": SYSTEM},
             {
