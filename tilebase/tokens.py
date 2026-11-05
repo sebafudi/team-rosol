@@ -1,32 +1,44 @@
 """Collectible tokens: the points a level pays and the HUD shows.
 
 Picking one up removes it from the map and grants a point on the credit
-ledger. Spending that balance on a voice edit comes later.
+ledger. Spending that balance on a voice edit comes later. A token is drawn
+as the X Money glyph (`assets/icons/xmoney.svg`, from x.com's own icon set).
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
+from tilebase.art import icon_image
 from tilebase.credits import Ledger, grant
 from tilebase.geom import Rect
 from tilebase.tiles import World, cells_overlapping, put_cell
 
 TOKEN_MARK = "token"
+# The title menu draws on a 320x180 canvas; the play view is 640x360.
+HUD_PX = 2
+HUD_MARGIN = 8
+POP_TIME = 0.7
+ROLL_RATE = 10.0
+ROLL_MIN = 6.0
+# The +N that floats off the sign, and the digits while they flash.
+GOLD = (250, 204, 72)
+EMBER = (150, 70, 10)
 
-_fonts: dict[int, object | None] = {}
+_signs: dict[tuple[str, bool], object] = {}
 
 
 def draw_token(screen: object, rect: Rect) -> None:
-    """A coin in the cell. It bobs so a pickup reads as an item, not a tile."""
+    """The X Money glyph in the cell. It bobs so it reads as an item, not a tile."""
     import pygame
 
     bob = math.sin(pygame.time.get_ticks() / 1000.0 * 3.2) * 2.5
-    _paint_coin(
+    _paint_money(
         screen,
         rect.x + rect.w / 2,
         rect.y + rect.h / 2 + bob,
-        min(rect.w, rect.h) * 0.30,
+        min(rect.w, rect.h) * 0.72,
     )
 
 
@@ -49,67 +61,102 @@ def collect(
     return current, grant(ledger, gained, reason="collect"), gained
 
 
-def draw_balance(screen: object, balance: int | None, view_w: int) -> None:
-    """Token counter in the top-right corner. `None` is the unlimited ledger."""
+@dataclass(frozen=True)
+class CounterLook:
+    """What the HUD counter shows: a rolling number and the last pickup's pop."""
+
+    target: int = 0
+    shown: float = 0.0
+    pop: float = 0.0
+    gain: int = 0
+
+
+def counter_step(look: CounterLook, balance: int | None, dt: float) -> CounterLook:
+    """Roll the shown number toward the balance; a gain restarts the pop."""
+    if balance is None:
+        return look
+    pop = max(0.0, look.pop - dt)
+    gain = look.gain
+    if balance > look.target:
+        gain = balance - look.target + (gain if pop > 0 else 0)
+        pop = POP_TIME
+    gap = balance - look.shown
+    step = max(ROLL_MIN, abs(gap) * ROLL_RATE) * dt
+    shown = balance if abs(gap) <= step else look.shown + math.copysign(step, gap)
+    return CounterLook(target=balance, shown=shown, pop=pop, gain=gain if pop > 0 else 0)
+
+
+def draw_balance(
+    screen: object, balance: int | None, view_w: int, look: CounterLook | None = None
+) -> None:
+    """Stone sign in the top-right corner, drawn like the title menu's buttons.
+
+    A brass badge carries the X Money glyph; the count rolls up on a pickup
+    while the sign hops and a `+N` floats off it. `None` is the unlimited ledger.
+    """
+    look = look or CounterLook(target=balance or 0, shown=float(balance or 0))
+    count = "INF" if balance is None else str(round(look.shown))
+    t = 1.0 - look.pop / POP_TIME if look.pop > 0 else 1.0
+    flash = look.pop > 0 and t < 0.35
+    sign = _sign_image(count, flash)
+    lift = round(math.sin(t * math.pi) * 3) if look.pop > 0 else 0
+    x = view_w - HUD_MARGIN - sign.get_width()
+    y = HUD_MARGIN - lift * HUD_PX
+    screen.blit(sign, (x, y))
+    if look.pop > 0 and look.gain > 0:
+        from tilebase.title import INK, pixel_text
+
+        label = f"+{look.gain}"
+        face = pixel_text(label, GOLD, HUD_PX * 2)
+        rim = pixel_text(label, INK, HUD_PX * 2)
+        lx = x - face.get_width() - 6 * HUD_PX - round(t * 6) * HUD_PX
+        ly = y + (sign.get_height() - face.get_height()) // 2 - round(t * 4) * HUD_PX
+        alpha = 255 if t < 0.6 else round(255 * (1.0 - t) / 0.4)
+        rim.set_alpha(alpha)
+        face.set_alpha(alpha)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)):
+            screen.blit(rim, (lx + dx * HUD_PX, ly + dy * HUD_PX))
+        screen.blit(face, (lx, ly))
+
+
+def _sign_image(count: str, flash: bool) -> object:
+    """The stone sign with badge and number, cached per text and flash state."""
+    key = (count, flash)
+    if key in _signs:
+        return _signs[key]
     import pygame
 
-    count_font = _font(28)
-    word_font = _font(18)
-    count = "∞" if balance is None else str(balance)
-    count_img = count_font.render(count, True, (255, 246, 214)) if count_font else None
-    word_img = word_font.render("tokens", True, (236, 214, 150)) if word_font else None
-    count_w = count_img.get_width() if count_img is not None else 14
-    word_w = word_img.get_width() if word_img is not None else 0
-    radius = 7
-    pad_x = 10
-    gap = 6
-    height = 30
-    width = pad_x + radius * 2 + gap + word_w + (gap if word_w else 0) + count_w + pad_x
-    margin = 8
-    x = view_w - margin - width
-    y = margin
-    panel = pygame.Surface((width, height), pygame.SRCALPHA)
-    panel.fill((12, 10, 22, 180))
-    screen.blit(panel, (x, y))
-    pygame.draw.rect(
-        screen,
-        (214, 168, 64),
-        pygame.Rect(x, y, width, height),
-        width=1,
-        border_radius=8,
-    )
-    cx = x + pad_x + radius
-    cy = y + height // 2
-    _paint_coin(screen, cx, cy, radius)
-    cursor = cx + radius + gap
-    if word_img is not None:
-        screen.blit(word_img, (cursor, y + (height - word_img.get_height()) // 2))
-        cursor += word_w + gap
-    if count_img is not None:
-        screen.blit(count_img, (cursor, y + (height - count_img.get_height()) // 2))
+    from tilebase.art import source_image
+    from tilebase.title import INK, PAPER, brass_platform, pixel_text, stone_sign
+
+    digits = pixel_text(count, EMBER if flash else INK, 2)
+    caption = pixel_text("TOKENS", INK, 1)
+    badge = 24
+    pad = 3
+    gap = 5
+    # Room for two digits so the sign does not twitch on the first few pickups.
+    text_w = max(digits.get_width(), caption.get_width(), pixel_text("00", INK, 2).get_width())
+    w = pad + badge + gap + text_w + pad + 4
+    h = badge + pad * 2 + 2
+    canvas = pygame.Surface((w + 2, h + 2), pygame.SRCALPHA)
+    stone_sign(canvas, Rect(0, 0, w, h), source_image("tiles", "solid.png"))
+    glyph = icon_image("xmoney", 18, PAPER if flash else INK)
+    brass_platform(canvas, Rect(pad, pad + 1, badge, badge), source_image("tiles", "platform.png"), glyph)
+    tx = pad + badge + gap
+    canvas.blit(caption, (tx, pad + 1))
+    canvas.blit(digits, (tx, pad + 1 + caption.get_height() + 2))
+    image = pygame.transform.scale(canvas, ((w + 2) * HUD_PX, (h + 2) * HUD_PX))
+    _signs[key] = image
+    return image
 
 
-def _paint_coin(screen: object, cx: float, cy: float, radius: float) -> None:
-    import pygame
-
-    r = max(2, round(radius))
-    center = (round(cx), round(cy))
-    pygame.draw.circle(screen, (92, 58, 12), center, r + 2)
-    pygame.draw.circle(screen, (242, 188, 52), center, r)
-    pygame.draw.circle(
-        screen,
-        (255, 232, 160),
-        (round(cx - r * 0.28), round(cy - r * 0.32)),
-        max(1, r // 3),
-    )
-
-
-def _font(size: int) -> object | None:
-    if size not in _fonts:
-        import pygame
-
-        try:
-            _fonts[size] = pygame.font.Font(None, size)
-        except (NotImplementedError, pygame.error):
-            _fonts[size] = None
-    return _fonts[size]
+def _paint_money(screen: object, cx: float, cy: float, size: float) -> None:
+    """The glyph centred on (cx, cy), white over a dark rim so it reads on any art."""
+    px = max(6, round(size))
+    rim = icon_image("xmoney", px, (10, 8, 20))
+    face = icon_image("xmoney", px, (255, 255, 255))
+    left = round(cx - px / 2)
+    top = round(cy - px / 2)
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)):
+        screen.blit(rim, (left + dx, top + dy))
+    screen.blit(face, (left, top))

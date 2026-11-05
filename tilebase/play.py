@@ -20,7 +20,7 @@ from tilebase.credits import finite_ledger
 from tilebase.geom import Rect, Size, Vec2
 from tilebase.move import Body
 from tilebase.tiles import Cell, World, cells_overlapping, define, load_map
-from tilebase.tokens import collect, draw_balance
+from tilebase.tokens import CounterLook, collect, counter_step, draw_balance
 
 TILE = 32
 VIEW = Size(640, 360)
@@ -215,6 +215,7 @@ async def run() -> None:
     edited = False
     cleared = False
     ledger = finite_ledger(0)
+    counter = CounterLook()
     jump_codes = _codes(pygame, JUMP_KEYS)
     dash_codes = _codes(pygame, DASH_KEYS)
     pad = None
@@ -411,7 +412,8 @@ async def run() -> None:
             dashes_left=p.dashes_left,
         )
         draw_marks(screen, origin, entities)
-        draw_balance(screen, ledger.balance, VIEW.w)
+        counter = counter_step(counter, ledger.balance, frame_dt)
+        draw_balance(screen, ledger.balance, VIEW.w, counter)
         if cleared:
             line = "you made it"
         elif listening and not prompt:
